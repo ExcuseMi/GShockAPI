@@ -57,7 +57,8 @@ object H5600Protocol : StandardProtocol() {
         val routes = link.connection.routes
         val transfers = link.transfers
         return withSetup(
-            super.linkHandlers(link) +
+            // No activity record on this model: its steps come from the LifeLog transfer.
+            super.linkHandlers(link) - CasioConstants.CHARACTERISTICS.CASIO_ACTIVITY_RECORD.code +
                 routes.own +
                 mapOf(
                     0x3D to link.notifications.gate::onManager,

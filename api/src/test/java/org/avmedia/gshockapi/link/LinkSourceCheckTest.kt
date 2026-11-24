@@ -197,6 +197,73 @@ class LinkSourceCheckTest {
         assertTrue("state or a write in the single-watch time code: $bad", bad.isEmpty())
     }
 
+    /**
+     * The per-link settings, alarms, timer, reminders, watch status, app information and activity record reach nothing
+     * of the single-watch adapters (only their stateless codecs and model tables), hold no object or companion var and
+     * are made only by their link's [org.avmedia.gshockapi.io.LinkIO], which only the link makes.
+     */
+    @Test fun thePerLinkIOReachesOnlyItsLink() {
+        val perLink = setOf(
+            "LinkIO.kt", "LinkAnswer.kt", "LinkWatchStatus.kt", "LinkAppInfo.kt", "LinkBasicSettings.kt", "LinkTimeAdjustment.kt",
+            "LinkH5600Settings.kt", "LinkAlarms.kt", "LinkTimer.kt", "LinkEvents.kt", "LinkStepCounter.kt",
+        )
+        val single = Regex(
+            """\bcasio\.WatchLink\b|import org\.avmedia\.gshockapi\.casio\.WatchLink\b|(?<![\w.])WatchLink\.(?!kt)\w+|""" +
+                """\b(CachedIO|RawSettingIO|ButtonPressedIO|TimeIO|SettingsIO|H5600SettingsIO|TimeAdjustmentIO|AlarmsIO|TimerIO|EventsIO|WatchNameIO|ErrorIO|AppInfoIO|StepCounterIO|MessageDispatcher|Connection)\.|""" +
+                """\bWatchConditionIO\.(?!WatchConditionValue\b)|\bIO\.(?!(WatchButton|DstState)\b)\w+|\bWatchInfo\.(?!(State|ModelInfo|WatchModel|buildState)\b)\w+""",
+        )
+        val found = sources().filter { it.name in perLink }
+        assertEquals("the per-link files are found", perLink, found.map { it.name }.toSet())
+        val bad = found.filter { single.containsMatchIn(it.readText()) }.map { "${it.name}: ${single.find(it.readText())!!.value}" }
+        assertTrue("the single-watch adapter reached from per-link code: $bad", bad.isEmpty())
+        found.forEach { f ->
+            Regex("""^\s*(?:internal |private )?object (\w+)""", RegexOption.MULTILINE).find(f.readText())?.let { fail("${f.name}: object ${it.groupValues[1]}") }
+            f.readText().split("companion object {").drop(1).forEach { body ->
+                assertFalse("${f.name}: a var in a companion", Regex("""\bvar\b""").containsMatchIn(body.substring(0, closing(body))))
+            }
+        }
+        val topLevelVars = found.flatMap { f ->
+            Regex("""^(?:@Volatile )?(?:internal |private )?(?:@Volatile )?(?:lateinit )?var (\w+)""", RegexOption.MULTILINE).findAll(f.readText()).map { "${f.name}: ${it.groupValues[1]}" }.toList()
+        }
+        assertEquals("top-level vars in the per-link IO", emptyList<String>(), topLevelVars)
+        only("a link's IO made", Regex("""(?<!class )\bLinkIO\("""), setOf("WatchLink.kt"))
+        only(
+            "a per-link IO object made",
+            Regex("""(?<!class )\b(LinkWatchStatus|LinkAppInfo|LinkBasicSettings|LinkTimeAdjustment|LinkH5600Settings|LinkAlarms|LinkTimer|LinkEvents|LinkStepCounter)\("""),
+            setOf("LinkIO.kt"),
+        )
+        only("an answer a read waits for made", Regex("""(?<!class )\bLinkAnswer(<[^>]*>)?\("""), perLink + "LinkTime.kt")
+    }
+
+    /** The single-watch IO objects hold nothing of a watch: no answer they wait for, no write of their own; the link's [org.avmedia.gshockapi.io.LinkIO] does. */
+    @Test fun theSingleWatchIOHoldsNoState() {
+        val adapters = setOf(
+            "SettingsIO.kt", "H5600SettingsIO.kt", "TimeAdjustmentIO.kt", "AlarmsIO.kt", "TimerIO.kt", "EventsIO.kt",
+            "WatchNameIO.kt", "WatchConditionIO.kt", "ErrorIO.kt", "AppInfoIO.kt", "StepCounterIO.kt",
+        )
+        val found = sources().filter { it.name in adapters }
+        assertEquals("the IO adapters are found", adapters, found.map { it.name }.toSet())
+        val state = Regex(
+            """CompletableDeferred|LinkAnswer|@Volatile|private var|\b(CachedIO|RawSettingIO)\.|\bIO\.(request|writeCmd|writeChecked)\(|""" +
+                """Connection\.sendMessage|\bWatchInfo\.(?!ModelInfo\b)\w+""",
+        )
+        val bad = found.filter { state.containsMatchIn(it.readText()) }.map { "${it.name}: ${state.find(it.readText())!!.value}" }
+        assertTrue("state, a write or the global model in the single-watch IO code: $bad", bad.isEmpty())
+        only("the single-watch IO", Regex("""\bWatchLink\.io\b"""), adapters)
+    }
+
+    /**
+     * Outbound messages and notifications go to a link's own dispatcher: the single-watch dispatcher has no table of the
+     * per-link objects (only the actions not per link yet), and nothing picks a link's protocol from the global model.
+     */
+    @Test fun aLinksMessagesAndProtocolAreItsOwn() {
+        val message = sources().single { it.name == "MessageDispatcher.kt" }.readText()
+        Regex("""\b(AlarmsIO|EventsIO|SettingsIO|TimeAdjustmentIO|TimerIO|TimeIO)\b""").find(message)?.let { fail("MessageDispatcher sends by itself: ${it.value}") }
+        only("the global model's protocol picked for a frame", Regex("""\bWatchInfo\.protocol\b"""), setOf("GShockAPI.kt", "HomeTimeIO.kt", "CommandSpec.kt"))
+        val dispatcher = sources().single { it.name == "LinkDispatcher.kt" }.readText()
+        assertTrue("a link's frames use its own model's protocol", dispatcher.contains("protocol: WatchProtocol = link.watchInfo.info.protocol"))
+    }
+
     private fun closing(body: String): Int {
         var depth = 1
         body.forEachIndexed { i, c ->

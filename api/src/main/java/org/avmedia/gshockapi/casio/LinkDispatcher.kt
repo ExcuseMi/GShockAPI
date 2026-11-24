@@ -5,6 +5,7 @@ import androidx.annotation.RequiresApi
 import java.util.UUID
 import org.avmedia.gshockapi.link.WatchLink
 import org.avmedia.gshockapi.protocols.WatchProtocol
+import org.json.JSONObject
 import timber.log.Timber
 
 /**
@@ -14,8 +15,11 @@ import timber.log.Timber
  */
 @RequiresApi(Build.VERSION_CODES.O)
 class LinkDispatcher internal constructor(private val link: WatchLink) {
-    /** A notification of this link's watch, as the manager logs it ("0x28 06 1D"), that came on [source] (null when not known). */
-    fun onReceived(data: String, protocol: WatchProtocol, source: UUID? = null) {
+    /**
+     * A notification of this link's watch, as the manager logs it ("0x28 06 1D"), that came on [source] (null when not
+     * known). [protocol]: this link's own model's, unless a test names one.
+     */
+    fun onReceived(data: String, protocol: WatchProtocol = link.watchInfo.info.protocol, source: UUID? = null) {
         // The answer to a settings read that waits goes to that read; everything else is dispatched as usual.
         if (link.rawSettings.offer(data)) return
         val key = protocol.linkKey(link, data, source) ?: return
@@ -27,4 +31,18 @@ class LinkDispatcher internal constructor(private val link: WatchLink) {
         }
         handler(protocol.unwrapPayload(data, key))
     }
+
+    /** An outbound message of this link (`{action: "GET_ALARMS"}`): the link's own object for its action carries it out. */
+    fun sendToWatch(message: String) {
+        val action = runCatching { JSONObject(message).getString("action") }.getOrNull()
+        val sender = action?.let { link.io.senders[it] }
+        if (sender == null) {
+            Timber.e("LinkDispatcher ${link.key}: no sender for $message")
+            return
+        }
+        sender(message)
+    }
+
+    /** This link's watch has an outbound action of that name. */
+    fun sends(action: String): Boolean = action in link.io.senders
 }

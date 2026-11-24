@@ -1,18 +1,11 @@
 package org.avmedia.gshockapi.io
 
-import CachedIO
 import android.os.Build
 import androidx.annotation.RequiresApi
-import com.google.gson.Gson
-import kotlinx.coroutines.CompletableDeferred
-import org.avmedia.gshockapi.WatchInfo
-import org.avmedia.gshockapi.ble.Connection
-import org.avmedia.gshockapi.ble.GetSetMode
 import org.avmedia.gshockapi.casio.CasioConstants
 import org.avmedia.gshockapi.model.Settings
 import org.avmedia.gshockapi.utils.Utils
 import org.json.JSONObject
-import timber.log.Timber
 
 @androidx.annotation.Keep
 class TimeAdjustmentInfo(
@@ -133,102 +126,25 @@ object TimeAdjustmentIOFunctional {
  */
 @RequiresApi(Build.VERSION_CODES.O)
 object TimeAdjustmentIO {
-    private data class State(
-        val deferredResult: CompletableDeferred<TimeAdjustmentInfo>? = null,
-    )
+    private val one: LinkTimeAdjustment get() = org.avmedia.gshockapi.casio.WatchLink.io.timeAdjustment
 
-    private var state = State()
-
-    /**
-     * Stores the original time adjustment data from the watch.
-     * Used to preserve unchanged fields when encoding modifications.
-     */
+    /** The `11` frame the one link's watch last sent; a write starts from it. */
     object CasioIsAutoTimeOriginalValue {
-        var value = ""
+        var value: String
+            get() = org.avmedia.gshockapi.casio.WatchLink.io.timeAdjustment.original
+            set(v) { org.avmedia.gshockapi.casio.WatchLink.io.timeAdjustment.original = v }
     }
 
-    @RequiresApi(Build.VERSION_CODES.O)
-    suspend fun request(): TimeAdjustmentInfo {
-        if (!WatchInfo.hasTimeAdjustment) {
-            return TimeAdjustmentInfo()
-        }
-        return CachedIO.request("GET_TIME_ADJUSTMENT") { key -> getTimeAdjustment(key) }
-    }
+    suspend fun request(): TimeAdjustmentInfo = one.request()
 
-    private suspend fun getTimeAdjustment(key: String): TimeAdjustmentInfo {
-        val deferred = CompletableDeferred<TimeAdjustmentInfo>()
-        synchronized(this) {
-            state = state.copy(deferredResult = deferred)
-        }
-        Connection.sendMessage("{ action: '$key'}")
-        return deferred.await()
-    }
+    fun set(settings: Settings) = one.set(settings)
 
-    fun set(settings: Settings) {
-        val settingJson = Gson().toJson(settings)
-        Connection.sendMessage("{action: \"SET_TIME_ADJUSTMENT\", value: $settingJson}")
-        // Keep the new value instead of reading it back: a read sent now can reach the
-        // watch before the queued write, and the watch then answers with the old value.
-        CachedIO.put(
-            "GET_TIME_ADJUSTMENT",
-            TimeAdjustmentInfo(settings.timeAdjustment, settings.adjustmentTimeMinutes),
-        )
-    }
+    fun onReceived(data: String) = one.onReceived(data)
 
-    fun onReceived(data: String) {
-        // Store original data for later encoding
-        CasioIsAutoTimeOriginalValue.value = data
-
-        // Use pure function to decode
-        TimeAdjustmentIOFunctional.decode(data)
-            .fold(
-                onSuccess = { info ->
-                    synchronized(this) {
-                        state.deferredResult?.complete(info)
-                        state = state.copy(deferredResult = null)
-                    }
-                },
-                onFailure = { error ->
-                    Timber.e("Failed to decode time adjustment: ${error.message}")
-                    synchronized(this) {
-                        state.deferredResult?.completeExceptionally(error)
-                        state = state.copy(deferredResult = null)
-                    }
-                },
-            )
-    }
-
-    fun onRunError() {
-        synchronized(this) {
-            state.deferredResult?.complete(TimeAdjustmentInfo())
-            state = state.copy(deferredResult = null)
-        }
-    }
+    fun onRunError() = one.onRunError()
 
     @Suppress("UNUSED_PARAMETER")
-    fun sendToWatch(message: String) {
-        // Use pure function to build command
-        IO.writeCmd(
-            GetSetMode.GET,
-            TimeAdjustmentIOFunctional.buildFetchCommand(),
-        )
-    }
+    fun sendToWatch(message: String) = one.sendToWatch()
 
-    fun sendToWatchSet(message: String) {
-        // Use pure function to encode settings
-        JSONObject(message).get("value").let { it as JSONObject }
-            .let { settings ->
-                TimeAdjustmentIOFunctional.encode(CasioIsAutoTimeOriginalValue.value, settings)
-            }
-            .fold(
-                onSuccess = { encodedData ->
-                    IO.writeCmd(GetSetMode.SET, encodedData)
-                    // The next change in this connection starts from what was written.
-                    CasioIsAutoTimeOriginalValue.value = Utils.fromByteArrayToHexStr(encodedData)
-                },
-                onFailure = { error ->
-                    Timber.e("Failed to encode time adjustment: ${error.message}")
-                },
-            )
-    }
+    fun sendToWatchSet(message: String) = one.sendToWatchSet(message)
 }

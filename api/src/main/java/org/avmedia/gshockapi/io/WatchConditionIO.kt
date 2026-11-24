@@ -1,10 +1,7 @@
 package org.avmedia.gshockapi.io
 
-import CachedIO
 import android.os.Build
 import androidx.annotation.RequiresApi
-import kotlinx.coroutines.CompletableDeferred
-import org.avmedia.gshockapi.WatchInfo
 import org.avmedia.gshockapi.utils.Utils
 import timber.log.Timber
 import kotlin.math.roundToInt
@@ -31,14 +28,14 @@ object WatchConditionIOFunctional {
      * [2] - Temperature in Celsius
      *
      * Battery calibration: Maps raw value to 0-100% using watch-specific
-     * lower and upper limits from WatchInfo.batteryLevelLowerLimit/UpperLimit
+     * lower and upper limits of its model (ModelInfo.batteryLevelLowerLimit/UpperLimit)
      *
      * No side effects - pure extraction.
      */
     fun decode(
         data: String,
-        batteryLevelLowerLimit: Int = WatchInfo.batteryLevelLowerLimit,
-        batteryLevelUpperLimit: Int = WatchInfo.batteryLevelUpperLimit,
+        batteryLevelLowerLimit: Int,
+        batteryLevelUpperLimit: Int,
     ): Result<WatchConditionValue> =
         runCatching {
             val intArr = Utils.toIntArray(data)
@@ -51,7 +48,7 @@ object WatchConditionIOFunctional {
             val batteryRawValue = bytes[0].toInt()
             Timber.i("battery level raw value: $batteryRawValue")
 
-            // Calibrate battery level using watch-specific limits (the connected watch's unless given)
+            // Calibrate battery level using the watch's own limits
             val range = batteryLevelUpperLimit - batteryLevelLowerLimit
 
             if (range <= 0) {
@@ -81,47 +78,9 @@ object WatchConditionIOFunctional {
 object WatchConditionIO {
     class WatchConditionValue(val batteryLevel: Int, val temperature: Int)
 
-    private data class State(
-        val deferredResult: CompletableDeferred<WatchConditionValue>? = null,
-    )
+    private val one: LinkWatchStatus get() = org.avmedia.gshockapi.casio.WatchLink.io.status
 
-    private var state = State()
+    suspend fun request(requestString: String = "28"): WatchConditionValue = one.requestCondition(requestString)
 
-    suspend fun request(requestString: String = "28"): WatchConditionValue =
-        CachedIO.request(requestString) { key -> getWatchCondition(key) }
-
-    private suspend fun getWatchCondition(key: String): WatchConditionValue {
-        val deferred = CompletableDeferred<WatchConditionValue>()
-        synchronized(this) {
-            state = state.copy(deferredResult = deferred)
-        }
-        IO.request(key)
-        return deferred.await()
-    }
-
-    fun onReceived(data: String) {
-        // Use pure function to decode watch condition
-        WatchConditionIOFunctional.decode(data)
-            .fold(
-                onSuccess = { condition ->
-                    if (condition.batteryLevel == 0 && condition.temperature == 0) {
-                        return@fold
-                    }
-                    // Convert to our public data class
-                    synchronized(this) {
-                        state.deferredResult?.complete(
-                            WatchConditionValue(condition.batteryLevel, condition.temperature),
-                        )
-                        state = state.copy(deferredResult = null)
-                    }
-                },
-                onFailure = { error ->
-                    Timber.e("Failed to decode watch condition: ${error.message}")
-                    synchronized(this) {
-                        state.deferredResult?.complete(WatchConditionValue(0, 0))
-                        state = state.copy(deferredResult = null)
-                    }
-                },
-            )
-    }
+    fun onReceived(data: String) = one.onCondition(data)
 }

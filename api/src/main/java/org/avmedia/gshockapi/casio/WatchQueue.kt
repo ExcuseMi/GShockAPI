@@ -35,6 +35,8 @@ class WatchQueue(
     scope: CoroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.IO),
     @Volatile var transport: WatchTransport,
     private val readTimeoutMs: Long = CommandTable.REQUEST_TIMEOUT_MS,
+    /** The DW-H5600 family's answer lengths apply to this watch: its link's own model decides ([CommandTable.layoutsApply] for a test). */
+    private val layouts: () -> Boolean = { CommandTable.layoutsApply() },
 ) {
     private class Item(val handle: GetSetMode, val data: ByteArray) {
         val done = CompletableDeferred<Outcome>()
@@ -126,7 +128,7 @@ class WatchQueue(
                 val status = answer.getOrNull(1)?.let { "%02X".format(it) } ?: "none"
                 return Outcome.failed("The watch refused the read (status $status).")
             }
-            if (!CommandTable.longEnough(verdict.frame, answer)) return Outcome(false, "The answer is shorter than the layout needs.", answer)
+            if (!CommandTable.longEnough(verdict.frame, answer, layouts())) return Outcome(false, "The answer is shorter than the layout needs.", answer)
             return Outcome(true, null, answer)
         } finally {
             synchronized(lock) { waiting = null }

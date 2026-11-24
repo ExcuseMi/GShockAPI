@@ -1,13 +1,7 @@
 package org.avmedia.gshockapi.io
 
-import CachedIO
 import android.os.Build
 import androidx.annotation.RequiresApi
-import kotlinx.coroutines.CompletableDeferred
-import org.avmedia.gshockapi.WatchInfo
-import org.avmedia.gshockapi.ble.GetSetMode
-import org.avmedia.gshockapi.utils.Utils
-import org.avmedia.gshockapi.utils.Utils.hexToBytes
 
 // ============================================================================
 // Pure Functional Core: App Info Scratchpad Processing
@@ -151,117 +145,31 @@ object AppInfoIOFunctional {
  */
 @RequiresApi(Build.VERSION_CODES.O)
 object AppInfoIO {
-    private data class State(
-        val deferredResult: CompletableDeferred<String>? = null,
-    )
+    private val one: LinkAppInfo get() = org.avmedia.gshockapi.casio.WatchLink.io.appInfo
 
-    private var state = State()
-    var lastReceivedData: ByteArray = ByteArray(0)
-        private set
+    val lastReceivedData: ByteArray get() = one.lastReceivedData
 
-    var wasScratchpadReset = false
+    /** The one watch's scratchpad was found empty and written again on the last read. */
+    var wasScratchpadReset: Boolean
+        get() = one.wasScratchpadReset
+        set(value) { one.wasScratchpadReset = value }
 
-    suspend fun request(): String {
-        return CachedIO.request("22") { key ->
-            val deferred = CompletableDeferred<String>()
-            synchronized(this) {
-                state = state.copy(deferredResult = deferred)
-            }
-            IO.request(key)
-            deferred.await()
-        }
-    }
+    suspend fun request(): String = one.request()
 
-    fun onReceived(data: String) {
-        wasScratchpadReset = false
-        // Convert received data to bytes
-        lastReceivedData = Utils.toCompactString(data).hexToBytes()
-
-        // Use pure function to check if reinitialization is needed.
-        // Never write app information on watches whose 0x22 is not used as a scratchpad.
-        if (WatchInfo.hasScratchpad && AppInfoIOFunctional.needsReinit(lastReceivedData)) {
-            initScratchPad()
-        }
-
-        synchronized(this) {
-            state.deferredResult?.complete(data)
-            state = state.copy(deferredResult = null)
-        }
-    }
-
-    private fun initScratchPad() {
-        // Use pure function to create initialized buffer
-        val buffer = AppInfoIOFunctional.createInitializedBuffer()
-
-        // Send the initialized buffer to the watch and update our local copy
-        IO.writeCmd(GetSetMode.SET, buffer.toHexString())
-        lastReceivedData = buffer
-        wasScratchpadReset = true
-    }
+    fun onReceived(data: String) = one.onReceived(data)
 
     /**
-     * Stores an array of bytes in the user data area of the scratchpad.
+     * Stores an array of bytes in the user data area of the scratchpad (the full area, from index 0).
      *
-     * Uses pure function to validate and transform data. The full user data
-     * area is always overwritten starting at index 0.
-     * Then executes the side effect (sending to watch).
-     *
-     * @param data The byte array to write, covering the full user data area.
      * @throws IllegalStateException if the scratchpad is not initialized.
      * @throws IllegalArgumentException if data exceeds buffer size.
      */
-    fun setUserData(data: ByteArray) {
-        // Check if scratchpad is initialized
-        if (!AppInfoIOFunctional.isScratchpadInitialized(lastReceivedData)) {
-            throw IllegalStateException("Scratchpad not initialized. Magic number missing.")
-        }
-
-        // Use pure function to write and validate — always the full user data region, from index 0
-        AppInfoIOFunctional.writeUserData(lastReceivedData, data, 0)
-            .fold(
-                onSuccess = { newBuffer ->
-                    // Execute side effect: update local copy and send to watch
-                    lastReceivedData = newBuffer
-                    IO.writeCmd(GetSetMode.SET, lastReceivedData.toHexString())
-                },
-                onFailure = { error ->
-                    throw error
-                },
-            )
-    }
-
-    /**
-     * Retrieves a segment of byte data from the user data area of the scratchpad.
-     *
-     * Uses pure function to validate and extract data.
-     *
-     * @param index The zero-based starting index within the user data area.
-     * @param len The number of bytes to retrieve.
-     * @return A [ByteArray] containing the requested data.
-     * @throws IllegalStateException if the scratchpad is not initialized.
-     * @throws IllegalArgumentException if the requested index or length is out of bounds.
-     */
+    fun setUserData(data: ByteArray) = one.setUserData(data)
 
     /**
      * Retrieves all data from the user data area of the scratchpad.
      *
-     * Uses pure function to validate and extract data.
-     *
-     * @return A [ByteArray] containing the full user data area.
      * @throws IllegalStateException if the scratchpad is not initialized.
      */
-    fun getUserData(): ByteArray {
-        // Check if scratchpad is initialized
-        if (!AppInfoIOFunctional.isScratchpadInitialized(lastReceivedData)) {
-            throw IllegalStateException("Scratchpad not initialized. Magic number missing.")
-        }
-
-        // Use pure function to read and validate — always the full user data region
-        val userDataSize = AppInfoIOFunctional.BUFFER_SIZE - AppInfoIOFunctional.USER_DATA_START_INDEX
-        return AppInfoIOFunctional.readUserData(lastReceivedData, 0, userDataSize)
-            .fold(
-                onSuccess = { data -> data },
-                onFailure = { error -> throw error },
-            )
-    }
+    fun getUserData(): ByteArray = one.getUserData()
 }

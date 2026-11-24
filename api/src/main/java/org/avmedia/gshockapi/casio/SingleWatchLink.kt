@@ -52,6 +52,9 @@ object WatchLink {
     /** The one link's time, for the single-watch time code ([org.avmedia.gshockapi.io.TimeIO] and the DST, world city and home time reads). */
     val time: org.avmedia.gshockapi.io.LinkTime get() = link.time
 
+    /** The one link's settings, alarms, timer, reminders and watch status, for their single-watch adapters (SettingsIO, AlarmsIO, ...). */
+    val io: org.avmedia.gshockapi.io.LinkIO get() = link.io
+
     /** The one link's dispatcher, for the single-watch [MessageDispatcher]. */
     val dispatcher: LinkDispatcher get() = link.dispatcher
 

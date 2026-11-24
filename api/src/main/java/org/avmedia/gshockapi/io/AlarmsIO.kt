@@ -1,12 +1,9 @@
 package org.avmedia.gshockapi.io
 
-import CachedIO
 import android.os.Build
 import androidx.annotation.RequiresApi
 import com.google.gson.Gson
-import kotlinx.coroutines.CompletableDeferred
 import org.avmedia.gshockapi.WatchInfo
-import org.avmedia.gshockapi.ble.Connection
 import org.avmedia.gshockapi.ble.GetSetMode
 import org.avmedia.gshockapi.casio.CasioConstants
 import org.avmedia.gshockapi.model.Alarm
@@ -54,9 +51,9 @@ object AlarmsIOFunctional {
      *
      * No side effects - returns parsed alarms for the IO shell to handle.
      */
-    fun parseReceivedAlarms(data: String): List<Alarm> =
+    fun parseReceivedAlarms(data: String, info: WatchInfo.ModelInfo): List<Alarm> =
         runCatching {
-            val decoded = AlarmDecoder.toJson(data).get("ALARMS")
+            val decoded = AlarmDecoder.toJson(data, info).get("ALARMS")
             val gson = Gson()
             val alarmArr = gson.fromJson(decoded.toString(), Array<Alarm>::class.java)
             alarmArr.toList()
@@ -135,32 +132,7 @@ object AlarmsIOFunctional {
 
 @RequiresApi(Build.VERSION_CODES.O)
 object AlarmsIO {
-    data class AlarmIOState(
-        val deferredResult: CompletableDeferred<ArrayList<Alarm>>? = null,
-        val alarms: ArrayList<Alarm> = ArrayList(),
-        val isProcessing: Boolean = false,
-        val error: String? = null,
-    )
-
-    private var state = AlarmIOState()
-    private var receivedAlarms = ArrayList<Alarm>()
-
-    private fun clearReceivedAlarms() {
-        receivedAlarms.clear()
-    }
-
-    private fun addSortedReceivedAlarms(source: Array<Alarm>) {
-        val position = if (source.size == 1) 0 else receivedAlarms.size
-        receivedAlarms.addAll(position, source.toList())
-    }
-
-    private fun getReceivedAlarms(): ArrayList<Alarm> = receivedAlarms
-
-    private fun updateState(transform: (AlarmIOState) -> AlarmIOState): AlarmIOState =
-        synchronized(this) {
-            state = transform(state)
-            state
-        }
+    private val one: LinkAlarms get() = org.avmedia.gshockapi.casio.WatchLink.io.alarms
 
     fun fromJsonAlarmFirstAlarm(alarmJson: JSONObject): ByteArray {
         val gson = Gson()
@@ -220,70 +192,16 @@ object AlarmsIO {
         return allAlarms
     }
 
-    suspend fun request(): ArrayList<Alarm> =
-        CachedIO.request("GET_ALARMS") { key ->
-            val deferred = CompletableDeferred<ArrayList<Alarm>>()
-            synchronized(this) {
-                state = state.copy(deferredResult = deferred, isProcessing = true)
-            }
-            clearReceivedAlarms()
-            Connection.sendMessage("{ action: '$key'}")
-            deferred.await()
-        }
+    suspend fun request(): ArrayList<Alarm> = one.request()
 
-    fun set(alarms: ArrayList<Alarm>) {
-        if (alarms.isEmpty()) {
-            updateState { it.copy(error = "Alarm model not initialised!") }
-            return
-        }
+    fun set(alarms: ArrayList<Alarm>) = one.set(alarms)
 
-        CachedIO.set("GET_ALARMS") {
-            val json = Gson().toJson(alarms)
-            Connection.sendMessage("{action: \"SET_ALARMS\", value: $json }")
-        }
-    }
-
-    fun onReceived(data: String) {
-        val parsedAlarms = AlarmsIOFunctional.parseReceivedAlarms(data)
-        addSortedReceivedAlarms(parsedAlarms.toTypedArray())
-
-        if (AlarmsIOFunctional.isAlarmCountComplete(
-                getReceivedAlarms().size,
-                WatchInfo.alarmCount,
-            )
-        ) {
-            synchronized(this) {
-                state.deferredResult?.complete(getReceivedAlarms())
-                state = state.copy(alarms = getReceivedAlarms(), isProcessing = false, deferredResult = null)
-            }
-        }
-    }
+    fun onReceived(data: String) = one.onReceived(data)
 
     @Suppress("UNUSED_PARAMETER")
-    fun sendToWatch(message: String) {
-        // Use protocol to build commands, then execute them sequentially
-        val commands = AlarmsIOFunctional.buildFetchCommands(WatchInfo.alarmCount)
-        commands.forEach { action ->
-            when (action) {
-                is BLEAction.Write -> IO.writeCmd(action.mode, action.data)
-            }
-        }
-    }
+    fun sendToWatch(message: String) = one.sendToWatch()
 
-    fun sendToWatchSet(message: String) {
-        // Use protocol to build commands, then execute them
-        AlarmsIOFunctional.buildSetCommand(message, WatchInfo.alarmCount)
-            .onSuccess { commands ->
-                commands.forEach { action ->
-                    when (action) {
-                        is BLEAction.Write -> IO.writeCmd(action.mode, action.data)
-                    }
-                }
-            }
-            .onFailure { error ->
-                Timber.e("Failed to set alarms: ${error.message}")
-            }
-    }
+    fun sendToWatchSet(message: String) = one.sendToWatchSet(message)
 }
 
 // ============================================================================
@@ -323,7 +241,7 @@ object AlarmDecoder {
      * @param command The raw command string containing alarm data
      * @return JSONObject with format: {"ALARMS": [array of alarm objects]}
      */
-    fun toJson(command: String): JSONObject =
+    fun toJson(command: String, info: WatchInfo.ModelInfo): JSONObject =
         runCatching {
             Utils.toIntArray(command).let { intArray ->
                 JSONArray().apply {
@@ -331,12 +249,12 @@ object AlarmDecoder {
                         CasioConstants.CHARACTERISTICS.CASIO_SETTING_FOR_ALM.code ->
                             ArrayList(
                                 intArray.drop(1),
-                            ).let(::createJsonAlarm).let(::put)
+                            ).let { createJsonAlarm(it, info) }.let(::put)
 
                         CasioConstants.CHARACTERISTICS.CASIO_SETTING_FOR_ALM2.code ->
                             intArray.drop(
                                 1,
-                            ).chunked(4).map { ArrayList(it) }.forEach { put(createJsonAlarm(it)) }
+                            ).chunked(4).map { ArrayList(it) }.forEach { put(createJsonAlarm(it, info)) }
 
                         else -> Timber.d("Unhandled Command [$command]")
                     }
@@ -361,13 +279,13 @@ object AlarmDecoder {
      * @param intArray ArrayList containing 4 bytes of alarm data
      * @return JSONObject containing the parsed alarm data
      */
-    private fun createJsonAlarm(intArray: ArrayList<Int>): JSONObject =
+    private fun createJsonAlarm(intArray: ArrayList<Int>, info: WatchInfo.ModelInfo): JSONObject =
         runCatching {
             Alarm(
                 hour = intArray[2],
                 minute = intArray[3],
                 enabled = intArray[0] and Alarms.ENABLED_MASK != 0,
-                hasHourlyChime = if (WatchInfo.hasHourlyChime) (intArray[0] and HOURLY_CHIME_MASK != 0) else false,
+                hasHourlyChime = if (info.hasHourlyChime) (intArray[0] and HOURLY_CHIME_MASK != 0) else false,
                 oneTime = intArray[0] and Alarms.ONE_TIME_MASK != 0,
             ).let { alarm ->
                 JSONObject(Gson().toJson(alarm))

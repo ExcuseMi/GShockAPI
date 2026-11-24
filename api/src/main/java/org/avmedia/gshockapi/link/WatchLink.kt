@@ -21,9 +21,11 @@ import org.avmedia.gshockapi.casio.WatchQueue
 import org.avmedia.gshockapi.casio.WatchTransport
 import org.avmedia.gshockapi.io.LinkButtonInfo
 import org.avmedia.gshockapi.io.LinkCache
+import org.avmedia.gshockapi.io.LinkIO
 import org.avmedia.gshockapi.io.LinkRawSettings
 import org.avmedia.gshockapi.io.LinkTime
 import org.avmedia.gshockapi.io.LinkTransfers
+import org.avmedia.gshockapi.protocols.H5600Protocol
 
 /** The GATT of one watch: writes, and the notification subscriptions the setup makes. A fake in the tests. */
 interface LinkGatt : WatchTransport {
@@ -47,7 +49,12 @@ class WatchLink internal constructor(
     @Volatile var gatt: LinkGatt = gatt
 
     /** The frame sequencer of this link: one frame at a time, a read done when its answer came. Reached only through [jobs]. */
-    @Volatile var frames: WatchQueue = WatchQueue(scope, transport = WatchTransport { channel, frame -> this.gatt.write(channel, frame) })
+    @Volatile var frames: WatchQueue = WatchQueue(
+        scope,
+        transport = WatchTransport { channel, frame -> this.gatt.write(channel, frame) },
+        // The answer lengths of this link's own model.
+        layouts = { watchInfo.info.protocol === H5600Protocol },
+    )
 
     val jobs = WatchJobQueue(scope, { frames }, initial)
 
@@ -70,6 +77,9 @@ class WatchLink internal constructor(
 
     /** This link's time: its time zone, its DST, world city and home time reads and the time write. */
     val time: LinkTime = LinkTime(this)
+
+    /** This link's settings, alarms, timer, reminders, name, battery, app information and activity record. */
+    val io: LinkIO = LinkIO(this)
 
     /** This link's LifeLog and workout transfers: what runs, waits or failed on them is this watch's alone. */
     val transfers: LinkTransfers = LinkTransfers(this)

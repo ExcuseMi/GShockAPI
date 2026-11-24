@@ -3,7 +3,6 @@ package org.avmedia.gshockapi.io
 import CachedIOFunctional
 import android.os.Build
 import androidx.annotation.RequiresApi
-import kotlinx.coroutines.CompletableDeferred
 import org.avmedia.gshockapi.ble.GetSetMode
 import org.avmedia.gshockapi.casio.CasioConstants
 import org.avmedia.gshockapi.casio.CasioTimeZoneHelper
@@ -12,26 +11,6 @@ import org.avmedia.gshockapi.utils.Utils
 import timber.log.Timber
 import java.time.Clock
 import java.util.TimeZone
-
-/** One answer a time read waits for (`1D`, `1E`, `1F`, `24`): only this link's watch completes it. */
-private class LinkAnswer {
-    @Volatile private var pending: CompletableDeferred<String>? = null
-
-    suspend fun ask(send: () -> Unit): String {
-        val deferred = CompletableDeferred<String>()
-        synchronized(this) { pending = deferred }
-        send()
-        return deferred.await()
-    }
-
-    fun onReceived(data: String) {
-        synchronized(this) {
-            val current = pending
-            current?.complete(data)
-            if (pending === current) pending = null
-        }
-    }
-}
 
 /**
  * The time of one link's watch: its time zone, its DST, world city and home time reads (`1D`, `1E`, `1F`, `24`) and the
@@ -47,10 +26,10 @@ class LinkTime internal constructor(private val link: WatchLink) {
 
     @Volatile private var zone = Zone()
 
-    private val dstWatchState = LinkAnswer()
-    private val dstForWorldCities = LinkAnswer()
-    private val worldCities = LinkAnswer()
-    private val homeTime = LinkAnswer()
+    private val dstWatchState = LinkAnswer<String>()
+    private val dstForWorldCities = LinkAnswer<String>()
+    private val worldCities = LinkAnswer<String>()
+    private val homeTime = LinkAnswer<String>()
 
     /** The answers of this link's watch to its time reads, by code. */
     val routes: Map<Int, (String) -> Unit> = mapOf(
@@ -60,13 +39,13 @@ class LinkTime internal constructor(private val link: WatchLink) {
         CasioConstants.CHARACTERISTICS.CASIO_HOME_TIME.code to ::onHomeTime,
     )
 
-    fun onDstWatchState(data: String) = dstWatchState.onReceived(data)
+    fun onDstWatchState(data: String) = dstWatchState.complete(data)
 
-    fun onDstForWorldCities(data: String) = dstForWorldCities.onReceived(data)
+    fun onDstForWorldCities(data: String) = dstForWorldCities.complete(data)
 
-    fun onWorldCities(data: String) = worldCities.onReceived(data)
+    fun onWorldCities(data: String) = worldCities.complete(data)
 
-    fun onHomeTime(data: String) = homeTime.onReceived(data)
+    fun onHomeTime(data: String) = homeTime.complete(data)
 
     fun setTimezone(timeZone: String) {
         zone = Zone(timeZone, CasioTimeZoneHelper.findTimeZone(timeZone))
@@ -77,7 +56,7 @@ class LinkTime internal constructor(private val link: WatchLink) {
     /** The time zone this link writes, for the model-specific time code that needs more than the time (coordinates, DST rules). */
     val casioTimezone: CasioTimeZoneHelper.CasioTimeZone get() = zone.casioZone
 
-    private suspend fun read(answer: LinkAnswer, key: String): String =
+    private suspend fun read(answer: LinkAnswer<String>, key: String): String =
         link.cache.request(key) { k -> answer.ask { link.command(GetSetMode.GET, IOFunctional.toCasioCmd(k)) } }
 
     suspend fun requestDstWatchState(state: IO.DstState): String = read(dstWatchState, "1d0${state.state}")

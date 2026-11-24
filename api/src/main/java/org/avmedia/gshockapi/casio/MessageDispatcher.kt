@@ -8,71 +8,49 @@ package org.avmedia.gshockapi.casio
 
 import android.os.Build
 import androidx.annotation.RequiresApi
-import org.avmedia.gshockapi.io.AlarmsIO
-import org.avmedia.gshockapi.io.EventsIO
 import org.avmedia.gshockapi.io.ExerciseIO
-import org.avmedia.gshockapi.io.SettingsIO
-import org.avmedia.gshockapi.io.TimeAdjustmentIO
-import org.avmedia.gshockapi.io.TimeIO
-import org.avmedia.gshockapi.io.TimerIO
-import org.avmedia.gshockapi.protocols.StandardProtocol
 import org.avmedia.gshockapi.protocols.WatchProtocol
 import org.json.JSONObject
 import timber.log.Timber
 
+/**
+ * The single-watch messages and notifications: both go to the one link's [LinkDispatcher], which carries an outbound
+ * action out with that link's own objects and routes a notification with that link's own model's protocol.
+ */
 @RequiresApi(Build.VERSION_CODES.O)
 object MessageDispatcher {
-    // =========================================================================
-    // Pure Functional Core: dispatch tables
-    // =========================================================================
-
-    /**
-     * Maps outbound action strings to their handler functions.
-     * Pure data — no side effects, no mutable state.
-     */
-    private val watchSenders: Map<String, (String) -> Unit> =
+    /** The actions that are not per link yet (other models): they reach the single-watch objects. */
+    private val singleWatchSenders: Map<String, (String) -> Unit> =
         mapOf(
-            "GET_ALARMS" to { AlarmsIO.sendToWatch(it) },
-            "SET_ALARMS" to { AlarmsIO.sendToWatchSet(it) },
             "GET_EXERCISE_PROFILE" to { ExerciseIO.sendToWatch(it) },
             "SET_EXERCISE_PROFILE" to { ExerciseIO.sendToWatchSet(it) },
-            "SET_REMINDERS" to { EventsIO.sendToWatchSet(it) },
-            "GET_SETTINGS" to { SettingsIO.sendToWatch(it) },
-            "SET_SETTINGS" to { SettingsIO.sendToWatchSet(it) },
-            "GET_TIME_ADJUSTMENT" to { TimeAdjustmentIO.sendToWatch(it) },
-            "SET_TIME_ADJUSTMENT" to { TimeAdjustmentIO.sendToWatchSet(it) },
-            "GET_TIMER" to { TimerIO.sendToWatch(it) },
-            "SET_TIMER" to { TimerIO.sendToWatchSet(it) },
-            "SET_TIME" to { TimeIO.sendToWatchSet(it) },
         )
 
-    // =========================================================================
-    // Pure helpers
-    // =========================================================================
-
-    /** Pure: extract the action string from an outbound message. */
     private fun extractAction(message: String): String? =
         runCatching { JSONObject(message).getString("action") }
             .onFailure { Timber.e("Failed to parse action from message: $message") }
             .getOrNull()
 
-    // =========================================================================
-    // Imperative Shell: dispatch with logging
-    // =========================================================================
-
     fun sendToWatch(message: String) {
         val action = extractAction(message) ?: return
-        val handler = watchSenders[action]
-        if (handler == null) {
-            Timber.e("No sender registered for action: $action")
-            return
+        val dispatcher = WatchLink.dispatcher
+        when {
+            dispatcher.sends(action) -> dispatcher.sendToWatch(message)
+            action in singleWatchSenders -> singleWatchSenders.getValue(action)(message)
+            else -> Timber.e("No sender registered for action: $action")
         }
-        handler(message)
     }
 
-    /** A notification of the one watch: its link's dispatcher routes it ([LinkDispatcher]). */
+    /**
+     * A notification of the one watch: its link's dispatcher routes it ([LinkDispatcher]) with the protocol of that
+     * link's model. [protocol] only for a test that names one.
+     */
     fun onReceived(
         data: String,
-        protocol: WatchProtocol = StandardProtocol,
-    ) = WatchLink.dispatcher.onReceived(data, protocol, WatchLink.currentSource())
+        protocol: WatchProtocol? = null,
+    ) {
+        val dispatcher = WatchLink.dispatcher
+        if (protocol == null) dispatcher.onReceived(data, source = WatchLink.currentSource())
+        else dispatcher.onReceived(data, protocol, WatchLink.currentSource())
+    }
 }

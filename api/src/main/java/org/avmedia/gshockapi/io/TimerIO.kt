@@ -1,16 +1,10 @@
 package org.avmedia.gshockapi.io
 
-import CachedIO
 import android.os.Build
 import androidx.annotation.RequiresApi
-import kotlinx.coroutines.CompletableDeferred
-import org.avmedia.gshockapi.WatchInfo
-import org.avmedia.gshockapi.ble.Connection
-import org.avmedia.gshockapi.ble.GetSetMode
 import org.avmedia.gshockapi.casio.CasioConstants
 import org.avmedia.gshockapi.utils.Utils
 import org.json.JSONObject
-import timber.log.Timber
 
 // ============================================================================
 // Pure Functional Core: Timer Processing Logic
@@ -137,75 +131,16 @@ object TimerIOFunctional {
  */
 @RequiresApi(Build.VERSION_CODES.O)
 object TimerIO {
-    private data class State(
-        val deferredResult: CompletableDeferred<Int>? = null,
-    )
+    private val one: LinkTimer get() = org.avmedia.gshockapi.casio.WatchLink.io.timer
 
-    private var state = State()
+    suspend fun request(requestString: String = "18"): Int = one.request(requestString)
 
-    suspend fun request(requestString: String = "18"): Int = CachedIO.request(requestString) { key -> getTimer(key) }
+    fun set(timerValue: Int) = one.set(timerValue)
 
-    private suspend fun getTimer(key: String): Int {
-        val deferred = CompletableDeferred<Int>()
-        synchronized(this) {
-            state = state.copy(deferredResult = deferred)
-        }
-        IO.request(key)
-        val result = deferred.await()
-        Timber.d("TimerIO: getTimer returning $result")
-        return result
-    }
-
-    fun set(timerValue: Int) {
-        fun setFunc() {
-            Connection.sendMessage("{action: \"SET_TIMER\", value: $timerValue}")
-        }
-        CachedIO.set("18") { setFunc() }
-    }
-
-    fun onReceived(data: String) {
-        Timber.d("TimerIO: onReceived raw data: $data")
-        // Use pure function to decode
-        TimerIOFunctional.decode(data)
-            .map { timerState -> timerState.totalSeconds }
-            .fold(
-                onSuccess = { seconds ->
-                    Timber.d("TimerIO: Decoded seconds: $seconds")
-                    synchronized(this) {
-                        state.deferredResult?.complete(seconds)
-                        state = state.copy(deferredResult = null)
-                    }
-                },
-                onFailure = { error ->
-                    Timber.e(error, "TimerIO: Failed to decode timer data")
-                    synchronized(this) {
-                        state.deferredResult?.completeExceptionally(error)
-                        state = state.copy(deferredResult = null)
-                    }
-                },
-            )
-    }
+    fun onReceived(data: String) = one.onReceived(data)
 
     @Suppress("UNUSED_PARAMETER")
-    fun sendToWatch(message: String) {
-        // Use pure function to build command, then execute
-        IO.writeCmd(
-            GetSetMode.GET,
-            TimerIOFunctional.buildFetchCommand(),
-        )
-    }
+    fun sendToWatch(message: String) = one.sendToWatch()
 
-    fun sendToWatchSet(message: String) {
-        // Use pure function to build command, then execute
-        val size = WatchInfo.protocol.getTimerSize()
-        TimerIOFunctional.buildSetCommand(message, size)
-            .fold(
-                onSuccess = { encodedData ->
-                    IO.writeCmd(GetSetMode.SET, encodedData)
-                },
-                onFailure = { error ->
-                    Timber.e("Failed to set timer: ${error.message}")
-                },
-            )
-    }
+    fun sendToWatchSet(message: String) = one.sendToWatchSet(message)
 }

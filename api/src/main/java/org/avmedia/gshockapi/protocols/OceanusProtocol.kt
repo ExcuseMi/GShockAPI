@@ -37,7 +37,8 @@ object OceanusProtocol : StandardProtocol() {
         get() = super.dataReceivedHandlers + own
 
     /** Its own answers win over a link's time reads too. */
-    override fun linkHandlers(link: WatchLink): Map<Int, (String) -> Unit> = super.linkHandlers(link) + own
+    override fun linkHandlers(link: WatchLink): Map<Int, (String) -> Unit> =
+        super.linkHandlers(link) + own + (0x11 to { data: String -> OceanusIO.onReceived(data); link.io.timeAdjustment.onReceived(data) })
 
     private val own: Map<Int, (String) -> Unit>
         get() =

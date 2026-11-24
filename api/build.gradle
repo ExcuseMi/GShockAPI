@@ -62,6 +62,8 @@ dependencies {
     implementation(libs.material3)
     testImplementation(libs.junit)
     testImplementation(libs.kotlinx.coroutines.test)
+    // The real org.json in host tests: the per-link alarms, reminders and outbound messages parse JSON.
+    testImplementation 'org.json:json:20231013'
     androidTestImplementation(libs.androidx.junit)
     androidTestImplementation(libs.androidx.espresso.core)
 

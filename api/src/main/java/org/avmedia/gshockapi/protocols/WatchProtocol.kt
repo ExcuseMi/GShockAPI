@@ -76,7 +76,8 @@ interface WatchProtocol {
 
     /** The codes [link]'s own objects answer. */
     fun linkRoutes(link: WatchLink): Map<Int, (String) -> Unit> =
-        link.time.routes +
+        link.io.routes +
+            link.time.routes +
             (CasioConstants.CHARACTERISTICS.CASIO_BLE_FEATURES.code to link.button::onReceived) +
             RAW_SETTING_CODES.associateWith { link.rawSettings::onReceived }
 

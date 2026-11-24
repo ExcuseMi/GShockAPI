@@ -1,11 +1,8 @@
 package org.avmedia.gshockapi.io
 
-import CachedIO
 import android.os.Build
 import androidx.annotation.RequiresApi
-import kotlinx.coroutines.CompletableDeferred
 import org.avmedia.gshockapi.utils.Utils
-import timber.log.Timber
 
 // ============================================================================
 // Pure Functional Core: Watch Name Extraction
@@ -51,36 +48,9 @@ object WatchNameIOFunctional {
  */
 @RequiresApi(Build.VERSION_CODES.O)
 object WatchNameIO {
-    private data class State(
-        val deferredResult: CompletableDeferred<String>? = null,
-    )
+    private val one: LinkWatchStatus get() = org.avmedia.gshockapi.casio.WatchLink.io.status
 
-    private var state = State()
+    suspend fun request(): String = one.requestName()
 
-    suspend fun request(): String = CachedIO.request("23") { key -> getWatchName(key) }
-
-    private suspend fun getWatchName(key: String): String {
-        val deferred = CompletableDeferred<String>()
-        synchronized(this) {
-            state = state.copy(deferredResult = deferred)
-        }
-        IO.request(key)
-        return deferred.await()
-    }
-
-    fun onReceived(data: String) {
-        // Use pure function to parse watch name
-        WatchNameIOFunctional.parseWatchName(data)
-            .fold(
-                onSuccess = { watchName ->
-                    state.deferredResult?.complete(watchName)
-                    state = State()
-                },
-                onFailure = { error ->
-                    Timber.e("Failed to parse watch name: ${error.message}")
-                    state.deferredResult?.complete("")
-                    state = State()
-                },
-            )
-    }
+    fun onReceived(data: String) = one.onName(data)
 }

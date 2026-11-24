@@ -8,7 +8,6 @@ package org.avmedia.gshockapi.utils
 
 import android.os.Build
 import androidx.annotation.RequiresApi
-import org.avmedia.gshockapi.WatchInfo
 import org.avmedia.gshockapi.ble.Connection
 import org.avmedia.gshockapi.ble.IDataReceived
 import org.avmedia.gshockapi.casio.MessageDispatcher
@@ -21,7 +20,8 @@ From there, the appropriate onReceived() method is called for the corresponding 
 object WatchDataListener {
     private val dataCallback =
         IDataReceived { data ->
-            data?.let { MessageDispatcher.onReceived(it, WatchInfo.protocol) }
+            // The one link's own model picks the protocol.
+            data?.let { MessageDispatcher.onReceived(it) }
         }
 
     fun init() {

@@ -2,7 +2,6 @@ package org.avmedia.gshockapi.io
 
 import android.os.Build
 import androidx.annotation.RequiresApi
-import timber.log.Timber
 
 // ============================================================================
 // Pure Functional Core: Error State Management
@@ -25,23 +24,12 @@ object ErrorIOFunctional {
 
 @RequiresApi(Build.VERSION_CODES.O)
 object ErrorIO {
-    private data class State(
-        val error: String = "",
-    )
+    private val one: LinkIO get() = org.avmedia.gshockapi.casio.WatchLink.io
 
-    private var state = State()
+    suspend fun request(): String = one.status.lastError()
 
-    suspend fun request(): String = ErrorIOFunctional.getErrorOrDefault(state.error)
-
+    /** An error frame of the one watch: the one link's routes take it (its settings reads that wait end). */
     fun onReceived(data: String) {
-        state = state.copy(error = data)
-        Timber.d("ErrorIO: onReceived: $data")
-
-        if (data.contains("81 13")) {
-            SettingsIO.onRunError()
-        }
-        if (data.contains("81 11")) {
-            TimeAdjustmentIO.onRunError()
-        }
+        one.routes.getValue(org.avmedia.gshockapi.casio.CasioConstants.CHARACTERISTICS.ERROR.code)(data)
     }
 }

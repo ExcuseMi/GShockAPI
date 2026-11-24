@@ -2,16 +2,10 @@ package org.avmedia.gshockapi.io
 
 import android.os.Build
 import androidx.annotation.RequiresApi
-import kotlinx.coroutines.CompletableDeferred
-import kotlinx.coroutines.withTimeoutOrNull
-import org.avmedia.gshockapi.WatchInfo
-import org.avmedia.gshockapi.ble.GetSetMode
 import org.avmedia.gshockapi.model.ActivityPeriod
 import org.avmedia.gshockapi.model.StepCounterData
-import org.avmedia.gshockapi.utils.Utils
 import timber.log.Timber
 import java.time.LocalDateTime
-import kotlin.time.Duration.Companion.milliseconds
 
 // ============================================================================
 // Pure Functional Core: Step Counter Decoding
@@ -257,115 +251,11 @@ object StepCounterIOFunctional {
 
 @RequiresApi(Build.VERSION_CODES.O)
 object StepCounterIO {
-    private const val FALLBACK_EXPECTED_LENGTH = 400
-    private const val DRSP_CATEGORY_EXERCISE = 0x11
-    private val START_TRANSACTION_CMD = byteArrayOf(0x00, DRSP_CATEGORY_EXERCISE.toByte(), 0x00, 0x00, 0x00)
-    private val END_TRANSACTION_CMD = byteArrayOf(0x04, DRSP_CATEGORY_EXERCISE.toByte(), 0x00, 0x00, 0x00)
+    private val one: LinkStepCounter get() = org.avmedia.gshockapi.casio.WatchLink.io.stepCounter
 
-    private var accumulator = ByteArray(0)
-    private var expectedLength: Int = FALLBACK_EXPECTED_LENGTH
-    private var result: CompletableDeferred<StepCounterData>? = null
-    private var peekMode: Boolean = false
-    private var lastData: StepCounterData? = null
+    suspend fun request(peek: Boolean = true): StepCounterData = one.request(peek)
 
-    suspend fun request(peek: Boolean = true): StepCounterData {
-        if (!WatchInfo.hasStepCounter) {
-            Timber.i("Step counter not supported on watch model: ${WatchInfo.model}")
-            return StepCounterData.unavailable()
-        }
+    fun onDrspReceived(data: ByteArray) = one.onDrspReceived(data)
 
-        // If we are peeking and an app transaction is already active, return cached data
-        val currentResult = synchronized(this) { result }
-        if (peek && currentResult != null && lastData != null) {
-            Timber.d("StepCounterIO: App transaction already active, returning cached data.")
-            return lastData!!
-        }
-
-        return getStepCount(peek)
-    }
-
-    private suspend fun getStepCount(peek: Boolean): StepCounterData {
-        val deferred = CompletableDeferred<StepCounterData>()
-        synchronized(this) {
-            accumulator = ByteArray(0)
-            expectedLength = FALLBACK_EXPECTED_LENGTH
-            result = deferred
-            peekMode = peek
-        }
-        try {
-            IO.writeCmd(GetSetMode.DATA_REQUEST, START_TRANSACTION_CMD)
-
-            val stepData = withTimeoutOrNull(10_000L.milliseconds) { deferred.await() }
-            if (stepData == null) {
-                Timber.w("StepCounterIO: timed out waiting for activity record (accumulated ${accumulator.size}/${expectedLength}B)")
-            }
-            return stepData ?: StepCounterData.unavailable()
-        } finally {
-            synchronized(this) {
-                result = null
-                accumulator = ByteArray(0)
-            }
-        }
-    }
-
-    fun onDrspReceived(data: ByteArray) {
-        if (data.size < 5) return
-        val command = data[0].toInt() and 0xFF
-        val category = data[1].toInt() and 0xFF
-        if (category != DRSP_CATEGORY_EXERCISE) return
-
-        if (command == 0x00) {
-            val length =
-                (data[2].toInt() and 0xFF) or
-                    ((data[3].toInt() and 0xFF) shl 8) or
-                    ((data[4].toInt() and 0xFF) shl 16)
-            synchronized(this) {
-                if (result != null) {
-                    expectedLength = length
-                    Timber.d("StepCounterIO: expected length announced = ${length}B")
-                }
-            }
-        }
-    }
-
-    fun onReceived(data: String) {
-        val deferred = synchronized(this) { result } ?: return
-
-        try {
-            val intArr = Utils.toIntArray(data)
-            val bytes = Utils.byteArrayOfIntArray(intArr.toIntArray())
-
-            val accumulated =
-                synchronized(this) {
-                    accumulator += bytes
-                    accumulator.size
-                }
-
-            Timber.d("StepCounterIO.onReceived: accumulated=${accumulated}B / expected=${expectedLength}B")
-
-            if (accumulated < expectedLength) {
-                return
-            }
-
-            // End transaction if not in peek mode
-            if (!peekMode) {
-                IO.writeCmd(GetSetMode.DATA_REQUEST, END_TRANSACTION_CMD)
-            }
-
-            val fullPayload = synchronized(this) { accumulator }
-            val stepData = StepCounterIOFunctional.parse(fullPayload)
-
-            if (stepData != null) {
-                Timber.i("Step count parsed: $stepData")
-                lastData = stepData
-                synchronized(this) { deferred.complete(stepData) }
-            } else {
-                Timber.w("Failed to parse activity record from ${fullPayload.size}B reassembled payload")
-                synchronized(this) { deferred.complete(StepCounterData.unavailable()) }
-            }
-        } catch (e: Exception) {
-            Timber.e("Exception parsing step counter data: ${e.message}")
-            synchronized(this) { deferred.complete(StepCounterData.unavailable()) }
-        }
-    }
+    fun onReceived(data: String) = one.onReceived(data)
 }
