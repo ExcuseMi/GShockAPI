@@ -1,5 +1,6 @@
 package org.avmedia.gshockapi.io
 
+import org.avmedia.gshockapi.casio.singleSetup
 import java.util.concurrent.CopyOnWriteArrayList
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -8,7 +9,6 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import org.avmedia.gshockapi.casio.CasioConstants
-import org.avmedia.gshockapi.casio.ConnectionKeepAlive
 import org.avmedia.gshockapi.casio.ConnectionSetup
 import org.avmedia.gshockapi.casio.WatchChannel
 import org.avmedia.gshockapi.casio.WatchLink
@@ -95,8 +95,8 @@ class LifeLogReadSpeedTest {
 
     @Before fun install() {
         H5600HealthIO.stepCounterSupported = { true }
-        ConnectionSetup.busy = { false }
-        ConnectionSetup.reset()
+        singleSetup.busy = { false }
+        singleSetup.reset()
         TestLog.clear()
     }
 
@@ -104,7 +104,7 @@ class LifeLogReadSpeedTest {
         H5600HealthIO.stepCounterSupported = { org.avmedia.gshockapi.WatchInfo.hasStepCounter }
         H5600HealthIO.readyWaitMs = 60_000L
         WatchLink.queue = savedQueue
-        ConnectionSetup.reset()
+        singleSetup.reset()
     }
 
     private fun install(watch: SlowLinkWatch) {
@@ -114,7 +114,7 @@ class LifeLogReadSpeedTest {
     @Test fun aReadWithNoNewDataOnASetUpLinkTakesOneAttemptAndNoSetupReplay() = runBlocking {
         val watch = SlowLinkWatch()
         install(watch)
-        ConnectionSetup.onWatchSetupDone()
+        singleSetup.onWatchSetupDone()
         val started = System.currentTimeMillis()
         H5600HealthIO.request(peek = true)
         val seconds = (System.currentTimeMillis() - started) / 1000.0
@@ -130,11 +130,11 @@ class LifeLogReadSpeedTest {
     @Test fun withoutTheWatchsSetupDoneNothingIsReadOrReplayed() = runBlocking {
         val watch = SlowLinkWatch(prepMs = 0)
         install(watch)
-        ConnectionSetup.watchSetupWaitMs = 500
+        singleSetup.watchSetupWaitMs = 500
         try {
             assertEquals(null, H5600HealthIO.request(peek = true).h5600)
         } finally {
-            ConnectionSetup.watchSetupWaitMs = ConnectionSetup.SETUP_WAIT_MS
+            singleSetup.watchSetupWaitMs = ConnectionSetup.SETUP_WAIT_MS
         }
         assertEquals(emptyList<Int>(), watch.reads.toList())
     }
@@ -143,7 +143,7 @@ class LifeLogReadSpeedTest {
         H5600HealthIO.readyWaitMs = 1_500L
         val watch = SlowLinkWatch(prepMs = Long.MAX_VALUE)
         install(watch)
-        ConnectionSetup.onWatchSetupDone()
+        singleSetup.onWatchSetupDone()
         val started = System.currentTimeMillis()
         val data = H5600HealthIO.request(peek = true)
         assertEquals(null, data.h5600)

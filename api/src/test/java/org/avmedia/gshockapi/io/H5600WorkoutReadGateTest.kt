@@ -1,5 +1,6 @@
 package org.avmedia.gshockapi.io
 
+import org.avmedia.gshockapi.casio.singleSetup
 import java.util.concurrent.CopyOnWriteArrayList
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
@@ -31,7 +32,7 @@ class H5600WorkoutReadGateTest {
     private val writes = CopyOnWriteArrayList<String>()
 
     @Before fun install() {
-        ConnectionSetup.reset()
+        singleSetup.reset()
         H5600WorkoutIO.resetBackoff()
         H5600WorkoutIO.clock = { now }
         H5600WorkoutIO.sink = { true }
@@ -54,7 +55,7 @@ class H5600WorkoutReadGateTest {
         H5600WorkoutIO.watch = { org.avmedia.gshockapi.WatchInfo.getAddress() }
         H5600WorkoutIO.setupWaitMs = ConnectionSetup.SETUP_WAIT_MS
         H5600WorkoutIO.resetBackoff()
-        ConnectionSetup.reset()
+        singleSetup.reset()
     }
 
     @Test fun noWorkoutRequestBeforeTheWatchSentItsSetupDone() = runBlocking {
@@ -63,7 +64,7 @@ class H5600WorkoutReadGateTest {
         delay(400)
         assertTrue(writes.toString(), writes.isEmpty())
         assertTrue(TestLog.recentEvents().any { it.contains("Workout read waits for 47 01") })
-        ConnectionSetup.onWatchSetupDone()
+        singleSetup.onWatchSetupDone()
         val result = withTimeoutOrNull(15_000) { read.await() }
         assertNotNull(result)
         assertEquals("001c0000000000000000", writes.first())
@@ -73,7 +74,7 @@ class H5600WorkoutReadGateTest {
     @Test fun theBackOffAfterAFailureIsTheFailedWatchsOnly() = runBlocking {
         var watch = "AA:AA:AA:AA:AA:01"
         H5600WorkoutIO.watch = { watch }
-        ConnectionSetup.onWatchSetupDone()
+        singleSetup.onWatchSetupDone()
         assertTrue(H5600WorkoutIO.download()!!.error!!.contains("fail reason 1"))
         watch = "BB:BB:BB:BB:BB:02"
         writes.clear()
@@ -86,7 +87,7 @@ class H5600WorkoutReadGateTest {
     }
 
     @Test fun afterAFailureAutomaticReadsWaitTenMinutesButTheButtonReads() = runBlocking {
-        ConnectionSetup.onWatchSetupDone()
+        singleSetup.onWatchSetupDone()
         assertTrue(H5600WorkoutIO.download()!!.error!!.contains("fail reason 1"))
         writes.clear()
         assertNull(H5600WorkoutIO.download())
@@ -103,7 +104,7 @@ class H5600WorkoutReadGateTest {
     }
 
     @Test fun aSecondAutomaticReadIsNotQueuedBehindAWaitingOne() = runBlocking {
-        ConnectionSetup.onWatchSetupDone()
+        singleSetup.onWatchSetupDone()
         val release = holdTheLink()
         val first = async(Dispatchers.IO) { H5600WorkoutIO.download() }
         delay(300)

@@ -1,5 +1,6 @@
 package org.avmedia.gshockapi.io
 
+import org.avmedia.gshockapi.casio.singleSetup
 import java.util.concurrent.CopyOnWriteArrayList
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
@@ -14,7 +15,6 @@ import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.withTimeoutOrNull
 import org.avmedia.gshockapi.ble.GetSetMode
-import org.avmedia.gshockapi.casio.ConnectionSetup
 import org.avmedia.gshockapi.casio.WatchChannel
 import org.avmedia.gshockapi.casio.WatchLink
 import org.avmedia.gshockapi.casio.WatchQueue
@@ -87,8 +87,8 @@ class WorkoutStartAfterExchangeTest {
     private val writes = CopyOnWriteArrayList<String>()
 
     @Before fun install() {
-        ConnectionSetup.reset()
-        ConnectionSetup.onWatchSetupDone()
+        singleSetup.reset()
+        singleSetup.onWatchSetupDone()
         H5600WorkoutIO.resetBackoff()
     }
 
@@ -97,7 +97,7 @@ class WorkoutStartAfterExchangeTest {
         H5600WorkoutIO.sink = savedSink
         H5600WorkoutIO.link = savedLink
         H5600WorkoutIO.resetBackoff()
-        ConnectionSetup.reset()
+        singleSetup.reset()
     }
 
     /** [FakeWatch] delivered like the connection does; the first [refusals] start writes get `03 01`. */

@@ -19,7 +19,7 @@ object NotificationSubscriptions {
     @Synchronized
     fun beginDiscovery() {
         subscribed.clear()
-        linkStartedAt = ConnectionKeepAlive.clock()
+        linkStartedAt = WatchLink.connection.keepAlive.clock()
     }
 
     /** True when [uuid] still has to be subscribed on this link. */
@@ -31,7 +31,7 @@ object NotificationSubscriptions {
 
     /** Logs the characteristic and the first two bytes of a notification during the first 90 s of the link. */
     fun logNotification(characteristic: UUID, hex: String?) {
-        val age = ConnectionKeepAlive.clock() - linkStartedAt
+        val age = WatchLink.connection.keepAlive.clock() - linkStartedAt
         if (linkStartedAt == 0L || age < 0 || age > LOG_WINDOW_MS) return
         val bytes = hex.orEmpty().removePrefix("0x").split(' ').filter { it.isNotBlank() }.map { it.removePrefix("0x") }
         ConnectionKeepAlive.log(

@@ -2,6 +2,7 @@ package org.avmedia.gshockapi.link
 
 import java.io.File
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -62,5 +63,59 @@ class LinkSourceCheckTest {
             Regex("""^\s*(?:internal |private )?object (\w+)""", RegexOption.MULTILINE).findAll(f.readText()).map { it.groupValues[1] }.toList()
         }
         assertEquals("objects in the link layer", listOf("NoGatt"), objects)
+        val topLevelVars = File("src/main/java/org/avmedia/gshockapi/link").listFiles()!!.flatMap { f ->
+            Regex("""^(?:internal |private )?(?:@Volatile )?(?:lateinit )?var (\w+)""", RegexOption.MULTILINE).findAll(f.readText()).map { "${f.name}: ${it.groupValues[1]}" }.toList()
+        }
+        assertEquals("top-level vars in the link layer", emptyList<String>(), topLevelVars)
+    }
+
+    /** The connection setup and keep-alive are one per link: no object holds them and nobody else makes one. */
+    @Test fun theConnectionSetupAndKeepAliveAreOnePerLink() {
+        only("a global setup or keep-alive", Regex("""^\s*(?:internal |private )?object (ConnectionSetup|ConnectionKeepAlive)\b""", RegexOption.MULTILINE), emptySet())
+        only("a connection context made", Regex("""(?<!class )\bConnectionContext\("""), setOf("WatchLink.kt"))
+        only("a setup or keep-alive made", Regex("""(?<!class )\b(ConnectionSetup|ConnectionKeepAlive)\("""), setOf("ConnectionKeepAlive.kt"))
+        only("a link writer made", Regex("""(?<!class )\bLinkWriter\("""), setOf("WatchLink.kt"))
+    }
+
+    /** Only the stateless parts (constants, the log, a pure helper) are reached by the class name; the rest through a link. */
+    @Test fun theSetupAndKeepAliveHoldNoStateReachableByName() {
+        val allowed = mapOf(
+            "ConnectionSetup" to setOf("WATCHED_CODES", "SETUP_WAIT_MS", "writeBackValue"),
+            "ConnectionKeepAlive" to setOf("CHECK", "SETUP", "log"),
+        )
+        val bad = sources().flatMap { f ->
+            Regex("""(?<![\w.\[])(ConnectionSetup|ConnectionKeepAlive)(?:\.|::)(\w+)""").findAll(f.readText())
+                .filter { it.groupValues[2] !in allowed.getValue(it.groupValues[1]) && it.groupValues[2] != "kt" }
+                .map { "${f.name}: ${it.value}" }.toList()
+        }
+        assertTrue("reached by name: $bad", bad.isEmpty())
+        val companions = listOf("ConnectionSetup.kt", "ConnectionKeepAlive.kt").map { name ->
+            val text = sources().single { it.name == name }.readText()
+            text.substringAfter("companion object {").let { body -> body.substring(0, closing(body)) }
+        }
+        companions.forEach { assertFalse("a var in a companion: $it", Regex("""\bvar\b""").containsMatchIn(it)) }
+    }
+
+    /**
+     * The single-watch route to the one link's setup and keep-alive (the deprecated adapter): only the code that is not
+     * per link yet. The list only gets shorter (step 4 moves these to their link).
+     */
+    @Test fun theSingleWatchContextIsUsedOnlyByTheCodeNotPerLinkYet() =
+        only(
+            "the single-watch connection context",
+            Regex("""\bWatchLink\.connection\b"""),
+            setOf(
+                "GShockAPI.kt", "IGShockManager.kt", "H5600Protocol.kt", "NotificationSubscriptions.kt",
+                "RawSettingIO.kt", "H5600WorkoutIO.kt", "H5600HealthIO.kt",
+            ),
+        )
+
+    private fun closing(body: String): Int {
+        var depth = 1
+        body.forEachIndexed { i, c ->
+            if (c == '{') depth++
+            if (c == '}' && --depth == 0) return i
+        }
+        return body.length
     }
 }

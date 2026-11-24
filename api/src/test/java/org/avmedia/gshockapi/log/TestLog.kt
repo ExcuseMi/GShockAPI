@@ -1,5 +1,6 @@
 package org.avmedia.gshockapi.log
 
+import org.avmedia.gshockapi.casio.singleKeepAlive
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -18,7 +19,7 @@ object TestLog : LibraryLogSink {
     }
 
     override fun log(source: LibraryLog.Source, text: String) {
-        val line = SimpleDateFormat("yyyy-MM-dd HH:mm:ss.SSS", Locale.US).format(Date(ConnectionKeepAlive.clock())) +
+        val line = SimpleDateFormat("yyyy-MM-dd HH:mm:ss.SSS", Locale.US).format(Date(singleKeepAlive.clock())) +
             " [" + source.name + "] " + text
         synchronized(lines) {
             lines.addLast(line)

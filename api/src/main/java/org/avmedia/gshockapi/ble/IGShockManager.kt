@@ -201,7 +201,7 @@ private class GShockManagerImpl(
         onConnected: OnConnectedType,
     ) {
         this.onConnected = onConnected
-        org.avmedia.gshockapi.casio.ConnectionSetup.reset()
+        org.avmedia.gshockapi.casio.WatchLink.connection.setup.reset()
 
         connect(device)
             .retry(3, 100)
@@ -265,7 +265,7 @@ private class GShockManagerImpl(
             Timber.i("$device onDeviceConnected — waiting for service discovery")
             ProgressEvents.onNext("ConnectionStarted")
             connectionState = ConnectionState.CONNECTING
-            org.avmedia.gshockapi.casio.ConnectionSetup.reset()
+            org.avmedia.gshockapi.casio.WatchLink.connection.setup.reset()
         }
 
         override fun onDeviceFailedToConnect(
@@ -315,9 +315,8 @@ private class GShockManagerImpl(
             reason: Int,
         ) {
             ProgressEvents.onNext("Disconnect", device)
-            // Jobs asked from now on wait for the link and its setup (up to their deadline).
+            // Jobs asked from now on wait for the link and its setup (up to their deadline); the connection setup starts over.
             org.avmedia.gshockapi.casio.WatchLink.link.onGattLost()
-            org.avmedia.gshockapi.casio.ConnectionSetup.onLinkLost()
             // A LifeLog read in progress ends with the link (it must not run its setup on the next one).
             org.avmedia.gshockapi.io.H5600HealthIO.onLinkLost()
 

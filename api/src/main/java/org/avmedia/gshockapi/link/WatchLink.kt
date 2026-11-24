@@ -7,6 +7,10 @@ import kotlinx.coroutines.Deferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.StateFlow
+import org.avmedia.gshockapi.ble.GetSetMode
+import org.avmedia.gshockapi.casio.ConnectionContext
+import org.avmedia.gshockapi.casio.LinkWriter
+import org.avmedia.gshockapi.casio.Outcome
 import org.avmedia.gshockapi.casio.WatchChannel
 import org.avmedia.gshockapi.casio.WatchQueue
 import org.avmedia.gshockapi.casio.WatchTransport
@@ -39,6 +43,15 @@ class WatchLink internal constructor(
 
     val state: StateFlow<LinkState> get() = jobs.state
 
+    /** This link's connection upkeep (`49`, `47`) and setup (`0x10` .. `0x39`): its writes are command jobs on this link. */
+    val connection: ConnectionContext = ConnectionContext(LinkWriter(this))
+
+    /** One request or write as a command job (fire and forget unless the result is awaited). */
+    fun command(handle: GetSetMode, data: ByteArray): Deferred<JobOutcome<Outcome>> =
+        submit(JobSpec("%s 0x%02X".format(handle.name.lowercase(), (data.firstOrNull()?.toInt() ?: 0) and 0xFF), COMMANDS, JobPriority.COMMAND, settleMs = JobSpec.COMMAND_SETTLE_MS)) {
+            exchange(handle, data)
+        }
+
     /** Extra steps of the setup after the subscriptions (protocol reads and writes), run inside the setup job. */
     @Volatile var protocolSetup: suspend JobScope.() -> Unit = {}
 
@@ -60,14 +73,20 @@ class WatchLink internal constructor(
         protocolSetup()
     }
 
-    /** The link dropped (the watch may come back by itself). */
-    fun onGattLost() = jobs.linkDown("The link to the watch was closed.")
+    /** The link dropped (the watch may come back by itself): its jobs wait or end, the next `0x10` answer starts a new setup. */
+    fun onGattLost() {
+        jobs.linkDown("The link to the watch was closed.")
+        connection.setup.onLinkLost()
+    }
 
     /** A notification of this link's watch: a read that waits may take it as its answer. */
     fun onNotification(characteristic: UUID, bytes: ByteArray) = frames.onNotification(characteristic, bytes)
 
     internal fun close() = jobs.close("The link to the watch was closed.")
 }
+
+/** The source of the link's own commands (the setup, the keep-alive and the single-watch API): one source, first asked first run. */
+private val COMMANDS = JobSource.System("single-watch API")
 
 /**
  * The links of every watch the phone talks to, by key (the stable watch id; the address until that exists). No current

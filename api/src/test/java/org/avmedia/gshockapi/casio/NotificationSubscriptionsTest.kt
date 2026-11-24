@@ -16,12 +16,12 @@ class NotificationSubscriptionsTest {
     private var now = 1_700_000_000_000L
 
     @Before fun setUp() {
-        ConnectionKeepAlive.clock = { now }
+        singleKeepAlive.clock = { now }
         TestLog.clear()
         NotificationSubscriptions.clear()
     }
 
-    @After fun restore() { ConnectionKeepAlive.clock = System::currentTimeMillis }
+    @After fun restore() { singleKeepAlive.clock = System::currentTimeMillis }
 
     @Test fun aReconnectSubscribesAgain() {
         NotificationSubscriptions.beginDiscovery()

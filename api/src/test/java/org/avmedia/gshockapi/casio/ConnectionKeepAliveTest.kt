@@ -23,19 +23,19 @@ class ConnectionKeepAliveTest {
     private val fake = FakeWriter()
 
     @Before fun install() {
-        ConnectionKeepAlive.writer = fake
-        ConnectionKeepAlive.clock = { 1_700_000_000_000L }
+        singleKeepAlive.writer = fake
+        singleKeepAlive.clock = { 1_700_000_000_000L }
         TestLog.clear()
-        ConnectionSetup.busy = { false }
-        ConnectionSetup.timeWriter = { timeWrites++ }
+        singleSetup.busy = { false }
+        singleSetup.timeWriter = { timeWrites++ }
     }
 
     private var timeWrites = 0
 
     @After fun restore() {
-        ConnectionKeepAlive.writer = ConnectionWriter
-        ConnectionKeepAlive.clock = System::currentTimeMillis
-        ConnectionSetup.busy = { org.avmedia.gshockapi.io.H5600HealthIO.isActive }
+        singleKeepAlive.writer = singleKeepAlive.linkWriter
+        singleKeepAlive.clock = System::currentTimeMillis
+        singleSetup.busy = { org.avmedia.gshockapi.io.H5600HealthIO.isActive }
     }
 
     private fun receive(data: String) = MessageDispatcher.onReceived(data, H5600Protocol)
@@ -74,7 +74,7 @@ class ConnectionKeepAliveTest {
     }
 
     @Test fun reconnectKindTenRunsTheWholeSetup() {
-        ConnectionSetup.reset()
+        singleSetup.reset()
         receive("0x10 00 00 00 00 00 00 00 0A 00")
         assertEquals(listOf(0x11), fake.requests)
         receive("0x11 01 02 03 04 0F 06 07 08 09 0A 0B 0C")
@@ -97,7 +97,7 @@ class ConnectionKeepAliveTest {
     }
 
     private fun kindFourteenUpTo39() {
-        ConnectionSetup.reset()
+        singleSetup.reset()
         receive("0x10 00 00 00 00 00 00 00 0E 00")
         assertEquals(listOf(0x23), fake.requests)
         receive("0x23 41 42 43")
@@ -146,7 +146,7 @@ class ConnectionKeepAliveTest {
     }
 
     @Test fun otherKindsSkipThe3AAnd3BSteps() {
-        ConnectionSetup.reset()
+        singleSetup.reset()
         receive("0x10 00 00 00 00 00 00 00 01 00")
         receive("0x11 01 02 03 04 04 06 07 08")
         assertEquals(1, fake.all.size)
@@ -155,12 +155,12 @@ class ConnectionKeepAliveTest {
     }
 
     @Test fun noSetupRunsWhileATransferIsActiveOrAfterItIsDone() {
-        ConnectionSetup.reset()
-        ConnectionSetup.busy = { true }
+        singleSetup.reset()
+        singleSetup.busy = { true }
         receive("0x10 00 00 00 00 00 00 00 0A 00")
         assertTrue(fake.requests.isEmpty())
-        ConnectionSetup.busy = { false }
-        ConnectionSetup.reset()
+        singleSetup.busy = { false }
+        singleSetup.reset()
         receive("0x10 00 00 00 00 00 00 00 01 00")
         receive("0x11 01 02 03 04 04 06 07 08")
         receive("0x23 41")
@@ -175,7 +175,7 @@ class ConnectionKeepAliveTest {
         receive("0x10 00 00 00 00 00 00 00 0E 00") // same link, setup done: skipped and logged
         assertEquals(before, fake.requests.size)
         assertTrue(TestLog.recentEvents().last().contains("setup skipped"))
-        ConnectionSetup.onLinkLost() // the watch drops the link and reconnects by itself, no connect() call
+        singleSetup.onLinkLost() // the watch drops the link and reconnects by itself, no connect() call
         receive("0x10 00 00 00 00 00 00 00 0E 00")
         assertEquals(0x23, fake.requests.last())
         receive("0x23 41 42 43")
@@ -184,25 +184,25 @@ class ConnectionKeepAliveTest {
     }
 
     @Test fun aKindAnswerDuringATransferIsDeferredAndRunsWhenItEnds() {
-        ConnectionSetup.reset()
-        ConnectionSetup.busy = { true }
+        singleSetup.reset()
+        singleSetup.busy = { true }
         receive("0x10 00 00 00 00 00 00 00 0E 00")
         assertTrue(fake.requests.isEmpty())
         assertTrue(TestLog.recentEvents().last().contains("setup deferred"))
-        ConnectionSetup.busy = { false }
-        ConnectionSetup.onTransferEnded()
+        singleSetup.busy = { false }
+        singleSetup.onTransferEnded()
         assertEquals(listOf(0x23), fake.requests)
-        ConnectionSetup.onTransferEnded() // nothing left to run
+        singleSetup.onTransferEnded() // nothing left to run
         assertEquals(listOf(0x23), fake.requests)
     }
 
     @Test fun aLostLinkDropsADeferredSetup() {
-        ConnectionSetup.reset()
-        ConnectionSetup.busy = { true }
+        singleSetup.reset()
+        singleSetup.busy = { true }
         receive("0x10 00 00 00 00 00 00 00 0E 00")
-        ConnectionSetup.onLinkLost()
-        ConnectionSetup.busy = { false }
-        ConnectionSetup.onTransferEnded()
+        singleSetup.onLinkLost()
+        singleSetup.busy = { false }
+        singleSetup.onTransferEnded()
         assertTrue(fake.requests.isEmpty())
     }
 }

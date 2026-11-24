@@ -1,14 +1,14 @@
 package org.avmedia.gshockapi.io
 
+import org.avmedia.gshockapi.casio.singleSetup
+import org.avmedia.gshockapi.casio.singleKeepAlive
 import java.util.concurrent.CopyOnWriteArrayList
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeoutOrNull
-import org.avmedia.gshockapi.casio.ConnectionKeepAlive
 import org.avmedia.gshockapi.casio.ConnectionSetup
-import org.avmedia.gshockapi.casio.ConnectionWriter
 import org.avmedia.gshockapi.casio.MessageDispatcher
 import org.avmedia.gshockapi.casio.WatchChannel
 import org.avmedia.gshockapi.casio.WatchLink
@@ -56,11 +56,11 @@ class TransferWaitsForWatchSetupTest {
     private val savedWorkoutLink = H5600WorkoutIO.link
 
     @Before fun install() {
-        ConnectionKeepAlive.writer = Writer()
+        singleKeepAlive.writer = Writer()
         TestLog.clear()
-        ConnectionSetup.busy = { false }
-        ConnectionSetup.timeWriter = {}
-        ConnectionSetup.reset()
+        singleSetup.busy = { false }
+        singleSetup.timeWriter = {}
+        singleSetup.reset()
         H5600HealthIO.stepCounterSupported = { true }
         H5600WorkoutIO.resetBackoff()
         H5600WorkoutIO.sink = { true }
@@ -78,10 +78,10 @@ class TransferWaitsForWatchSetupTest {
         H5600WorkoutIO.setupWaitMs = ConnectionSetup.SETUP_WAIT_MS
         H5600WorkoutIO.resetBackoff()
         H5600HealthIO.stepCounterSupported = { org.avmedia.gshockapi.WatchInfo.hasStepCounter }
-        ConnectionSetup.watchSetupWaitMs = ConnectionSetup.SETUP_WAIT_MS
-        ConnectionKeepAlive.writer = ConnectionWriter
-        ConnectionSetup.busy = { H5600HealthIO.isActive || H5600WorkoutIO.isActive }
-        ConnectionSetup.reset()
+        singleSetup.watchSetupWaitMs = ConnectionSetup.SETUP_WAIT_MS
+        singleKeepAlive.writer = singleKeepAlive.linkWriter
+        singleSetup.busy = { H5600HealthIO.isActive || H5600WorkoutIO.isActive }
+        singleSetup.reset()
     }
 
     private fun receive(data: String) = MessageDispatcher.onReceived(data, H5600Protocol)
@@ -104,7 +104,7 @@ class TransferWaitsForWatchSetupTest {
         assertTrue("no transfer holds the link", !WatchLink.busy())
         assertNotNull("a settings read does not wait", withTimeoutOrNull(1_000) { holdTheLink().complete(Unit) })
 
-        ConnectionSetup.onWatchSetupDone()
+        singleSetup.onWatchSetupDone()
         val first = withTimeoutOrNull(3_000) { while (link.frames.isEmpty()) delay(20); link.frames.first() }
         read.cancel()
         assertEquals("after 47 01 the read starts with the step goal, no setup replay", "43", first)
@@ -112,7 +112,7 @@ class TransferWaitsForWatchSetupTest {
 
     @Test fun withoutSetupDoneTheTransfersAreLeftOutAndNothingIsSent() = runBlocking {
         kindTenSetupDone()
-        ConnectionSetup.watchSetupWaitMs = 500
+        singleSetup.watchSetupWaitMs = 500
         H5600WorkoutIO.setupWaitMs = 500
 
         val data = withTimeoutOrNull(5_000) { H5600HealthIO.request(peek = true) }

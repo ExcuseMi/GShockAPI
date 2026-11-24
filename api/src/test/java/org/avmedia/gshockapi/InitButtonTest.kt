@@ -1,10 +1,10 @@
 package org.avmedia.gshockapi
 
+import org.avmedia.gshockapi.casio.singleSetup
 import CachedIO
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
 import org.avmedia.gshockapi.casio.CommandTable
-import org.avmedia.gshockapi.casio.ConnectionSetup
 import org.avmedia.gshockapi.io.ButtonPressedIO
 import org.avmedia.gshockapi.io.IO
 import org.junit.After
@@ -25,13 +25,13 @@ class InitButtonTest {
     @Before fun clean() {
         CachedIO.clearCache()
         ButtonPressedIO.forgetAnswer()
-        ConnectionSetup.reset()
-        ConnectionSetup.busy = { true } // the kind is noted, no setup writes start
+        singleSetup.reset()
+        singleSetup.busy = { true } // the kind is noted, no setup writes start
     }
 
     @After fun restore() {
-        ConnectionSetup.busy = { org.avmedia.gshockapi.io.H5600HealthIO.isActive || org.avmedia.gshockapi.io.H5600WorkoutIO.isActive }
-        ConnectionSetup.reset()
+        singleSetup.busy = { org.avmedia.gshockapi.io.H5600HealthIO.isActive || org.avmedia.gshockapi.io.H5600WorkoutIO.isActive }
+        singleSetup.reset()
         ButtonPressedIO.forgetAnswer()
         CachedIO.clearCache()
     }
@@ -48,13 +48,13 @@ class InitButtonTest {
     }
 
     @Test fun theKindOfTheLinkTellsAnAutomaticReconnect() {
-        assertFalse(ConnectionSetup.isAutomaticConnect())
-        ConnectionSetup.onKind(kind14)
-        assertTrue(ConnectionSetup.isAutomaticConnect())
-        ConnectionSetup.reset()
-        assertFalse(ConnectionSetup.isAutomaticConnect())
-        ConnectionSetup.onKind(kind1)
-        assertFalse(ConnectionSetup.isAutomaticConnect())
+        assertFalse(singleSetup.isAutomaticConnect())
+        singleSetup.onKind(kind14)
+        assertTrue(singleSetup.isAutomaticConnect())
+        singleSetup.reset()
+        assertFalse(singleSetup.isAutomaticConnect())
+        singleSetup.onKind(kind1)
+        assertFalse(singleSetup.isAutomaticConnect())
     }
 
     @Test fun noAnswerOnAnAutomaticReconnectCompletesInitWithOneLogLineAndNoError() {

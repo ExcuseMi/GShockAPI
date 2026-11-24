@@ -1,11 +1,10 @@
 package org.avmedia.gshockapi.io
 
+import org.avmedia.gshockapi.casio.singleSetup
+import org.avmedia.gshockapi.casio.singleKeepAlive
 import kotlinx.coroutines.async
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.runBlocking
-import org.avmedia.gshockapi.casio.ConnectionKeepAlive
-import org.avmedia.gshockapi.casio.ConnectionSetup
-import org.avmedia.gshockapi.casio.ConnectionWriter
 import org.avmedia.gshockapi.casio.MessageDispatcher
 import org.avmedia.gshockapi.casio.WatchWriter
 import org.avmedia.gshockapi.log.TestLog
@@ -37,18 +36,18 @@ class SetupFirstTest {
     private val link = FakeSettingLink()
 
     @Before fun install() {
-        ConnectionKeepAlive.writer = writer
+        singleKeepAlive.writer = writer
         TestLog.clear()
-        ConnectionSetup.busy = { false }
-        ConnectionSetup.timeWriter = {}
+        singleSetup.busy = { false }
+        singleSetup.timeWriter = {}
         RawSettingIO.link = link
         RawSettingIO.settleMs = 0
-        ConnectionSetup.reset()
+        singleSetup.reset()
     }
 
     @After fun restore() {
-        ConnectionKeepAlive.writer = ConnectionWriter
-        ConnectionSetup.busy = { H5600HealthIO.isActive || H5600WorkoutIO.isActive }
+        singleKeepAlive.writer = singleKeepAlive.linkWriter
+        singleSetup.busy = { H5600HealthIO.isActive || H5600WorkoutIO.isActive }
         RawSettingIO.link = AndroidSettingLink
         RawSettingIO.settleMs = 1_000L
     }
@@ -59,14 +58,14 @@ class SetupFirstTest {
 
     @Test fun aSettingsReadWaitsUntilTheSetupHasItsAnswers() = runBlocking {
         startKind14()
-        assertTrue(ConnectionSetup.isRunning())
+        assertTrue(singleSetup.isRunning())
         val read = async { RawSettingIO.read(byteArrayOf(0x45), 2_000) }
         delay(300)
         assertTrue("nothing may be sent in front of the setup's requests", link.requests.isEmpty())
         link.onRequest = { RawSettingIO.offer("0x45 01 02 03") }
         receive("0x23 41 42 43")
         receive("0x39 04")
-        assertFalse(ConnectionSetup.isRunning())
+        assertFalse(singleSetup.isRunning())
         assertEquals(listOf(0x45, 1, 2, 3), read.await().frame!!.map { it.toInt() and 0xFF })
     }
 
@@ -82,7 +81,7 @@ class SetupFirstTest {
 
     @Test fun theWaitEndsAtTheTimeoutAndSaysSo() = runBlocking {
         startKind14()
-        assertFalse(ConnectionSetup.awaitIdle(timeoutMs = 150, pollMs = 10))
+        assertFalse(singleSetup.awaitIdle(timeoutMs = 150, pollMs = 10))
         assertTrue(TestLog.recentEvents().any { it.contains("still at") })
     }
 

@@ -219,12 +219,12 @@ object H5600HealthIO {
      * reads of ours (they took the setup's answers). Without `47 01` the read is left out on this link (false).
      */
     private suspend fun watchSetupReady(): Boolean {
-        if (!org.avmedia.gshockapi.casio.ConnectionSetup.watchSetupDone) {
+        if (!org.avmedia.gshockapi.casio.WatchLink.connection.setup.watchSetupDone) {
             org.avmedia.gshockapi.casio.ConnectionKeepAlive.log("LifeLog read waits for 47 01 (the watch's setup)")
         }
-        if (org.avmedia.gshockapi.casio.ConnectionSetup.awaitWatchSetup()) return true
+        if (org.avmedia.gshockapi.casio.WatchLink.connection.setup.awaitWatchSetup()) return true
         org.avmedia.gshockapi.casio.ConnectionKeepAlive.log(
-            "LifeLog read left out: no 47 01 in ${org.avmedia.gshockapi.casio.ConnectionSetup.watchSetupWaitMs / 1000} s on this link",
+            "LifeLog read left out: no 47 01 in ${org.avmedia.gshockapi.casio.WatchLink.connection.setup.watchSetupWaitMs / 1000} s on this link",
         )
         lastError = "The watch has not finished its setup on this connection. The LifeLog is read at the next connection."
         return false
@@ -335,7 +335,7 @@ object H5600HealthIO {
         } finally {
             setupWaiting = false
             synchronized(lock) { active = null }
-            org.avmedia.gshockapi.casio.ConnectionSetup.onTransferEnded()
+            org.avmedia.gshockapi.casio.WatchLink.connection.setup.onTransferEnded()
             transfer.setupReplies.close()
             transfer.outbox.close()
             Timber.i("H5600: attempt end")

@@ -1,5 +1,6 @@
 package org.avmedia.gshockapi.io
 
+import org.avmedia.gshockapi.casio.singleSetup
 import java.util.concurrent.CopyOnWriteArrayList
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -9,8 +10,6 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import org.avmedia.gshockapi.casio.CasioConstants
-import org.avmedia.gshockapi.casio.ConnectionKeepAlive
-import org.avmedia.gshockapi.casio.ConnectionSetup
 import org.avmedia.gshockapi.casio.WatchChannel
 import org.avmedia.gshockapi.casio.WatchLink
 import org.avmedia.gshockapi.casio.WatchQueue
@@ -93,9 +92,9 @@ class LifeLogWorkoutsFirstTest {
     @Before fun install() {
         H5600HealthIO.stepCounterSupported = { true }
         H5600HealthIO.readyWaitMs = 1_500L
-        ConnectionSetup.busy = { false }
-        ConnectionSetup.reset()
-        ConnectionSetup.onWatchSetupDone()
+        singleSetup.busy = { false }
+        singleSetup.reset()
+        singleSetup.onWatchSetupDone()
         TestLog.clear()
     }
 
@@ -104,7 +103,7 @@ class LifeLogWorkoutsFirstTest {
         H5600HealthIO.readyWaitMs = 60_000L
         H5600HealthIO.workoutsFirst = savedRun
         WatchLink.queue = savedQueue
-        ConnectionSetup.reset()
+        singleSetup.reset()
     }
 
     private fun run(condition: ByteArray): Pair<WorkoutHoldingWatch, List<String>> = runBlocking {

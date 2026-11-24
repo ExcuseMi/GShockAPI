@@ -1,5 +1,6 @@
 package org.avmedia.gshockapi.io
 
+import org.avmedia.gshockapi.casio.singleSetup
 import java.util.concurrent.CopyOnWriteArrayList
 import java.util.concurrent.atomic.AtomicReference
 import kotlinx.coroutines.CompletableDeferred
@@ -12,7 +13,6 @@ import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.withTimeout
 import kotlinx.coroutines.withTimeoutOrNull
 import org.avmedia.gshockapi.ble.GetSetMode
-import org.avmedia.gshockapi.casio.ConnectionSetup
 import org.avmedia.gshockapi.casio.Outcome
 import org.avmedia.gshockapi.casio.WatchChannel
 import org.avmedia.gshockapi.casio.WatchLink
@@ -119,8 +119,8 @@ class TransferJobsTest {
                 if (data.size == 3 && data.all { it.toInt() == 0 }) H5600WorkoutIO.onDrsp("03 01")
             }
         }
-        ConnectionSetup.reset()
-        ConnectionSetup.onWatchSetupDone()
+        singleSetup.reset()
+        singleSetup.onWatchSetupDone()
         try {
             assertTrue(WatchLink.writeChecked(GetSetMode.SET, byteArrayOf(0x12)))
             val read = async(Dispatchers.IO) { H5600WorkoutIO.download(userAsked = true) }
@@ -132,7 +132,7 @@ class TransferJobsTest {
             H5600WorkoutIO.sink = savedSink
             H5600WorkoutIO.link = savedLink
             H5600WorkoutIO.resetBackoff()
-            ConnectionSetup.reset()
+            singleSetup.reset()
         }
         assertTrue(0x13 in sent)
     }

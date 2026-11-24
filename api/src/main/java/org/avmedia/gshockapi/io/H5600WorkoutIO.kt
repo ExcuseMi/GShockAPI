@@ -163,9 +163,9 @@ object H5600WorkoutIO {
 
     /** Like the LifeLog: no transfer before the watch's setup is done (`47 01`) and our own setup is idle. False: left out on this link. */
     private suspend fun awaitWatchSetup(): Boolean {
-        if (org.avmedia.gshockapi.casio.ConnectionSetup.watchSetupDone) return org.avmedia.gshockapi.casio.ConnectionSetup.awaitWatchSetup(setupWaitMs)
+        if (org.avmedia.gshockapi.casio.WatchLink.connection.setup.watchSetupDone) return org.avmedia.gshockapi.casio.WatchLink.connection.setup.awaitWatchSetup(setupWaitMs)
         log("Workout read waits for 47 01 (the watch's setup)")
-        val came = org.avmedia.gshockapi.casio.ConnectionSetup.awaitWatchSetup(setupWaitMs)
+        val came = org.avmedia.gshockapi.casio.WatchLink.connection.setup.awaitWatchSetup(setupWaitMs)
         log(if (came) "Workout read: 47 01 came" else "Workout read left out: no 47 01 in ${setupWaitMs / 1000} s on this link")
         return came
     }
@@ -232,7 +232,7 @@ object H5600WorkoutIO {
             throw t
         } finally {
             inbox = null
-            org.avmedia.gshockapi.casio.ConnectionSetup.onTransferEnded()
+            org.avmedia.gshockapi.casio.WatchLink.connection.setup.onTransferEnded()
             _status.value = null
             running.set(false)
         }

@@ -1,5 +1,6 @@
 package org.avmedia.gshockapi.io
 
+import org.avmedia.gshockapi.casio.singleSetup
 import java.util.concurrent.CopyOnWriteArrayList
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -10,8 +11,6 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import org.avmedia.gshockapi.casio.CasioConstants
-import org.avmedia.gshockapi.casio.ConnectionKeepAlive
-import org.avmedia.gshockapi.casio.ConnectionSetup
 import org.avmedia.gshockapi.casio.WatchChannel
 import org.avmedia.gshockapi.casio.WatchLink
 import org.avmedia.gshockapi.casio.WatchQueue
@@ -107,9 +106,9 @@ class HealthReadWorkoutsTest {
     @Before fun install() {
         H5600HealthIO.stepCounterSupported = { true }
         H5600HealthIO.readyWaitMs = 5_000L
-        ConnectionSetup.busy = { false }
-        ConnectionSetup.reset()
-        ConnectionSetup.onWatchSetupDone()
+        singleSetup.busy = { false }
+        singleSetup.reset()
+        singleSetup.onWatchSetupDone()
         TestLog.clear()
         H5600WorkoutIO.resetBackoff()
         WatchLink.queue = WatchQueue(transport = lifeLog, readTimeoutMs = 2_000)
@@ -123,7 +122,7 @@ class HealthReadWorkoutsTest {
         H5600WorkoutIO.link = savedLink
         H5600WorkoutIO.resetBackoff()
         WatchLink.queue = savedQueue
-        ConnectionSetup.reset()
+        singleSetup.reset()
     }
 
     /** The scripted workout watch of [FakeWatch], its frames delivered the way the connection delivers them. */

@@ -4,6 +4,7 @@ import java.util.UUID
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.launch
 import org.avmedia.gshockapi.ble.GetSetMode
 import kotlinx.coroutines.Deferred
 import org.avmedia.gshockapi.link.JobOutcome
@@ -25,7 +26,28 @@ import org.avmedia.gshockapi.link.NoGatt
 object WatchLink {
     /** Ready from the start: until the connection code reports the link's state, the manager waits for the watch itself. */
     val link: org.avmedia.gshockapi.link.WatchLink =
-        org.avmedia.gshockapi.link.WatchLink("single", NoGatt, CoroutineScope(SupervisorJob() + Dispatchers.IO), LinkState.READY)
+        org.avmedia.gshockapi.link.WatchLink("single", NoGatt, CoroutineScope(SupervisorJob() + Dispatchers.IO), LinkState.READY).also {
+            singleWatchHooks(it.connection.setup)
+        }
+
+    /**
+     * The connection setup and keep-alive of the one link, for the single-watch code that is not per link yet (the
+     * protocol handlers, the transfers, the settings reads). New code takes them from its own link.
+     */
+    val connection: ConnectionContext get() = link.connection
+
+    /** The one link's setup hands its end to the single-watch transfer and time code. A link from the registry has none of this. */
+    private fun singleWatchHooks(setup: ConnectionSetup) {
+        setup.afterSetup = { org.avmedia.gshockapi.io.H5600WorkoutIO.onSetupDone(it) }
+        setup.busy = { org.avmedia.gshockapi.io.H5600HealthIO.isActive || org.avmedia.gshockapi.io.H5600WorkoutIO.isActive }
+        setup.timeWriter = {
+            CoroutineScope(Dispatchers.IO).launch {
+                runCatching { org.avmedia.gshockapi.io.TimeIO.set() }
+                    .onFailure { ConnectionKeepAlive.log("time write failed: ${it.message}") }
+            }
+        }
+        setup.onReset = { org.avmedia.gshockapi.io.ButtonPressedIO.forgetAnswer() }
+    }
 
     /**
      * The frame sequencer of the one link; tests put their own in. The jobs of the old one end with it (a job stuck on a
@@ -67,12 +89,7 @@ object WatchLink {
 
     private val TRANSFER = JobSource.System("transfer")
 
-    private fun job(handle: GetSetMode, data: ByteArray) =
-        link.submit(JobSpec("%s 0x%02X".format(handle.name.lowercase(), (data.firstOrNull()?.toInt() ?: 0) and 0xFF), SOURCE, JobPriority.COMMAND, settleMs = JobSpec.COMMAND_SETTLE_MS)) {
-            exchange(handle, data)
-        }
-
-    private val SOURCE = JobSource.System("single-watch API")
+    private fun job(handle: GetSetMode, data: ByteArray) = link.command(handle, data)
 
     /** Puts a request or write in the queue (fire and forget). */
     fun write(handle: GetSetMode, data: ByteArray) {

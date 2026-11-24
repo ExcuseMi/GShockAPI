@@ -54,17 +54,17 @@ class WatchQueueTest {
         queue = WatchQueue(scope, transport, readTimeoutMs = 400)
         WatchLink.queue = queue
         NotificationGate.reset()
-        ConnectionKeepAlive.writer = ConnectionWriter
+        singleKeepAlive.writer = singleKeepAlive.linkWriter
         TestLog.clear()
-        ConnectionSetup.busy = { false }
-        ConnectionSetup.reset()
+        singleSetup.busy = { false }
+        singleSetup.reset()
     }
 
     @After fun restore() {
         CommandTable.strict = false
         CommandTable.layoutsApply = { org.avmedia.gshockapi.WatchInfo.protocol === H5600Protocol }
-        ConnectionKeepAlive.writer = ConnectionWriter
-        ConnectionSetup.busy = { org.avmedia.gshockapi.io.H5600HealthIO.isActive }
+        singleKeepAlive.writer = singleKeepAlive.linkWriter
+        singleSetup.busy = { org.avmedia.gshockapi.io.H5600HealthIO.isActive }
     }
 
     private fun b(vararg v: Int) = ByteArray(v.size) { v[it].toByte() }
@@ -127,7 +127,7 @@ class WatchQueueTest {
     }
 
     @Test fun linkLossIsTheFrame0001OnTheAllFeaturesCharacteristic() {
-        ConnectionKeepAlive.onSetup("0x47 02")
+        singleKeepAlive.onSetup("0x47 02")
         waitFor("the Link Loss write") { transport.sent.isNotEmpty() }
         assertEquals(listOf(WatchChannel.ALL_FEATURES to listOf(0x00, 0x01)), transport.sent.toList())
     }

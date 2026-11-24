@@ -19,34 +19,54 @@ interface WatchWriter {
     fun writeLinkLoss(level: Int)
 }
 
-internal object ConnectionWriter : WatchWriter {
-    override fun writeAllFeatures(bytes: ByteArray) = WatchLink.write(GetSetMode.SET, bytes)
+/** The writer of one link: every write is a command job on that link, so it reaches only that link's watch. */
+internal class LinkWriter(private val link: org.avmedia.gshockapi.link.WatchLink) : WatchWriter {
+    override fun writeAllFeatures(bytes: ByteArray) {
+        link.command(GetSetMode.SET, bytes)
+    }
 
-    override fun request(code: Int) = WatchLink.write(GetSetMode.GET, byteArrayOf(code.toByte()))
+    override fun request(code: Int) {
+        link.command(GetSetMode.GET, byteArrayOf(code.toByte()))
+    }
 
-    override fun writeLinkLoss(level: Int) = WatchLink.write(GetSetMode.SET, linkLossFrame(level))
+    override fun writeLinkLoss(level: Int) {
+        link.command(GetSetMode.SET, linkLossFrame(level))
+    }
+}
+
+/** The connection upkeep and setup of one link: made by the link, never shared with another. */
+class ConnectionContext internal constructor(linkWriter: WatchWriter) {
+    val keepAlive: ConnectionKeepAlive = ConnectionKeepAlive(linkWriter) { setup.onWatchSetupDone() }
+
+    val setup: ConnectionSetup = ConnectionSetup(keepAlive)
 }
 
 /**
  * The connection upkeep of the DW-H5600 family: the watch notifies `49 00` (connection check)
  * and the app answers at once with `49 01`; the watch notifies `47 01` when its setup is done and `47 02` to ask for the
  * Link Loss alert level 1. Every such notification is logged with its time so a health-log share shows whether the
- * drops stop. Pure apart from the [writer].
+ * drops stop. Pure apart from the [writer]. One per link ([ConnectionContext]).
  */
-object ConnectionKeepAlive {
-    const val CHECK = 0x49
-    const val SETUP = 0x47
+class ConnectionKeepAlive internal constructor(
+    /** The link's own writer, what [writer] is when no test put another in. */
+    val linkWriter: WatchWriter,
+    private val watchSetupDone: () -> Unit,
+) {
+    companion object {
+        const val CHECK = 0x49
+        const val SETUP = 0x47
 
-    @Volatile var writer: WatchWriter = ConnectionWriter
+        /** The watch's connection events go to the library log, source Watch. */
+        fun log(text: String) = LibraryLog.log(LibraryLog.Source.Watch, text)
+    }
+
+    @Volatile var writer: WatchWriter = linkWriter
 
     /** Called on `47 01` (the watch's setup is done): the app writes what was waiting for it. */
     @Volatile var onSetupDone: () -> Unit = {}
 
     /** The time source of the link age checks (a fixed clock in the tests). */
     @Volatile var clock: () -> Long = System::currentTimeMillis
-
-    /** The watch's connection events go to the library log, source Watch. */
-    fun log(text: String) = LibraryLog.log(LibraryLog.Source.Watch, text)
 
     private fun values(data: String): List<Int> = runCatching { Utils.toIntArray(data) }.getOrDefault(emptyList())
 
@@ -66,7 +86,7 @@ object ConnectionKeepAlive {
         when (val value = values(data).getOrNull(1)) {
             1 -> {
                 log("47 01 received: the watch's setup is done")
-                ConnectionSetup.onWatchSetupDone()
+                watchSetupDone()
                 runCatching { onSetupDone() }
             }
             2 -> {

@@ -126,7 +126,7 @@ object RawSettingIO {
         val key = request.joinToString("") { "%02X".format(it) }
         // A reader of the same request waits for the answer that is already asked for.
         synchronized(lock) { current?.takeIf { it.key == key && it.deferred.isActive } }?.let { return await(it, timeoutMs, code) }
-        org.avmedia.gshockapi.casio.ConnectionSetup.awaitIdle()
+        org.avmedia.gshockapi.casio.WatchLink.connection.setup.awaitIdle()
         return sendLock.withLock {
             val pending = Pending(key, code, accept)
             synchronized(lock) { current = pending }

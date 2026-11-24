@@ -1,5 +1,6 @@
 package org.avmedia.gshockapi.io
 
+import org.avmedia.gshockapi.casio.singleSetup
 import java.util.UUID
 import java.util.concurrent.CopyOnWriteArrayList
 import kotlinx.coroutines.Dispatchers
@@ -8,7 +9,6 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeoutOrNull
 import org.avmedia.gshockapi.casio.CasioConstants
-import org.avmedia.gshockapi.casio.ConnectionSetup
 import org.avmedia.gshockapi.casio.MessageDispatcher
 import org.avmedia.gshockapi.casio.WatchLink
 import org.avmedia.gshockapi.log.TestLog
@@ -52,8 +52,8 @@ class H5600WorkoutGroupHeaderTest {
     }
 
     @Before fun install() {
-        ConnectionSetup.reset()
-        ConnectionSetup.onWatchSetupDone()
+        singleSetup.reset()
+        singleSetup.onWatchSetupDone()
         H5600WorkoutIO.resetBackoff()
         H5600WorkoutIO.sink = { true }
         H5600WorkoutIO.link = object : WorkoutLink {
@@ -88,7 +88,7 @@ class H5600WorkoutGroupHeaderTest {
         H5600WorkoutIO.sink = savedSink
         H5600WorkoutIO.link = savedLink
         H5600WorkoutIO.resetBackoff()
-        ConnectionSetup.reset()
+        singleSetup.reset()
     }
 
     @Test fun theFramesOfTheDumpChecksumAsTheWatchSentThem() {

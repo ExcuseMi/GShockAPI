@@ -126,8 +126,8 @@ class GShockAPI(private val context: Context) : IGShockAPI {
 
         val decision = InitCheck.decide(
             button,
-            org.avmedia.gshockapi.casio.ConnectionSetup.isAutomaticConnect(),
-            kindKnown = org.avmedia.gshockapi.casio.ConnectionSetup.lastKind != null,
+            org.avmedia.gshockapi.casio.WatchLink.connection.setup.isAutomaticConnect(),
+            kindKnown = org.avmedia.gshockapi.casio.WatchLink.connection.setup.lastKind != null,
         )
         decision.log?.let {
             Timber.w(it)

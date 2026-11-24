@@ -1,10 +1,10 @@
 package org.avmedia.gshockapi.io
 
+import org.avmedia.gshockapi.casio.singleSetup
 import kotlinx.coroutines.async
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
-import org.avmedia.gshockapi.casio.ConnectionSetup
 import org.avmedia.gshockapi.log.TestLog
 import org.junit.After
 import org.junit.Assert.assertFalse
@@ -36,8 +36,8 @@ class LifeLogLinkTest {
 
     @Before fun install() {
         H5600HealthIO.stepCounterSupported = { true }
-        ConnectionSetup.reset()
-        ConnectionSetup.onWatchSetupDone()
+        singleSetup.reset()
+        singleSetup.onWatchSetupDone()
     }
 
     @After fun restore() {

@@ -1,8 +1,5 @@
 package org.avmedia.gshockapi.casio
 
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.launch
 import org.avmedia.gshockapi.utils.Utils
 
 /**
@@ -12,22 +9,45 @@ import org.avmedia.gshockapi.utils.Utils
  * `DC 05`. The "settings data for this kind of connection" step is not traced and is left out.
  *
  * Driven by the frames the watch sends; one run per connection ([reset] at the start of a connection).
- * Never answers a frame it did not ask for.
+ * Never answers a frame it did not ask for. One per link ([ConnectionContext]): its writes go through that link's
+ * [ConnectionKeepAlive.writer]; its hooks are no-ops until the link's owner sets them.
  */
-object ConnectionSetup {
+class ConnectionSetup internal constructor(private val keepAlive: ConnectionKeepAlive) {
+    companion object {
+        /** Codes whose answers the setup (or the button info read) reacts to: a settings read of them must not swallow the answer. */
+        val WATCHED_CODES: Set<Int> = setOf(CODE_KIND, CODE_BLE, CODE_3A, CODE_3B, CODE_NAME, CODE_CONDITION, CODE_TIME_MANAGER)
+
+        const val SETUP_WAIT_MS = 20_000L
+
+        /**
+         * The value written back after reading [code]: `0x11` with bit 2 of value index 4 cleared, `0x3A` with value index 7 and 8 set
+         * to `DC 05`, every other value as read. Used by the connection setup and by the LifeLog setup, so both write the same bytes.
+         */
+        fun writeBackValue(code: Int, reply: ByteArray): ByteArray {
+            val b = reply.copyOf()
+            if (code == CODE_BLE && b.size >= 6) b[5] = (b[5].toInt() and 0x04.inv()).toByte()
+            if (code == CODE_3A && b.size >= 10) {
+                b[8] = 0xDC.toByte()
+                b[9] = 0x05
+            }
+            return b
+        }
+
+        private const val CODE_KIND = 0x10
+        private const val CODE_BLE = 0x11
+        private const val CODE_3A = 0x3A
+        private const val CODE_3B = 0x3B
+        private const val CODE_NAME = 0x23
+        private const val CODE_CONDITION = 0x28
+        private const val CODE_TIME_MANAGER = 0x39
+        private val ALWAYS_CONNECT_KINDS = setOf(9, 10)
+
+        /** 13: the watch connected itself after sleep, 14: after a link loss. The setup on these kinds: no 0x11, 0x3A, 0x3B; the 0x39 exchange. */
+        private val SELF_CONNECT_KINDS = setOf(13, 14)
+    }
+
     private enum class Step { IDLE, WAIT_KIND, WAIT_11, WAIT_3B, WAIT_3A, WAIT_23, WAIT_39, DONE }
 
-    private const val CODE_KIND = 0x10
-    private const val CODE_BLE = 0x11
-    private const val CODE_3A = 0x3A
-    private const val CODE_3B = 0x3B
-    private const val CODE_NAME = 0x23
-    private const val CODE_CONDITION = 0x28
-    private const val CODE_TIME_MANAGER = 0x39
-    private val ALWAYS_CONNECT_KINDS = setOf(9, 10)
-
-    /** 13: the watch connected itself after sleep, 14: after a link loss. The setup on these kinds: no 0x11, 0x3A, 0x3B; the 0x39 exchange. */
-    private val SELF_CONNECT_KINDS = setOf(13, 14)
     private var selfConnect = false
     private var condition: List<Int> = emptyList()
 
@@ -36,21 +56,16 @@ object ConnectionSetup {
     private var workoutsOffered = false
 
     /** Called once per connection with the first `0x28` answer after the setup; the workout download starts from it. */
-    @Volatile var afterSetup: (List<Int>) -> Unit = { org.avmedia.gshockapi.io.H5600WorkoutIO.onSetupDone(it) }
+    @Volatile var afterSetup: (List<Int>) -> Unit = {}
 
     /** Set by the transfer code: while a LifeLog transfer runs the setup does not start. */
-    @Volatile var busy: () -> Boolean = { org.avmedia.gshockapi.io.H5600HealthIO.isActive || org.avmedia.gshockapi.io.H5600WorkoutIO.isActive }
+    @Volatile var busy: () -> Boolean = { false }
 
-    /**
-     * The end of the setup, run on every connection (kind 14 included): the time and the DST values.
-     * The default hands them to the library's own time setter.
-     */
-    @Volatile var timeWriter: () -> Unit = {
-        CoroutineScope(Dispatchers.IO).launch {
-            runCatching { org.avmedia.gshockapi.io.TimeIO.set() }
-                .onFailure { ConnectionKeepAlive.log("time write failed: ${it.message}") }
-        }
-    }
+    /** The end of the setup, run on every connection (kind 14 included): the time and the DST values. */
+    @Volatile var timeWriter: () -> Unit = {}
+
+    /** Run at every [reset]: what else the link's owner forgets with the setup (the single-watch button answer). */
+    @Volatile var onReset: () -> Unit = {}
 
     /** The `0x10` answer held back because a transfer was active; run by [onTransferEnded]. */
     @Volatile private var deferredKind: String? = null
@@ -98,11 +113,6 @@ object ConnectionSetup {
         return done
     }
 
-    /** Codes whose answers the setup (or the button info read) reacts to: a settings read of them must not swallow the answer. */
-    val WATCHED_CODES: Set<Int> = setOf(CODE_KIND, CODE_BLE, CODE_3A, CODE_3B, CODE_NAME, CODE_CONDITION, CODE_TIME_MANAGER)
-
-    const val SETUP_WAIT_MS = 20_000L
-
     /** How long a LifeLog read waits for `47 01` before it leaves this link alone; a test seam. */
     @Volatile var watchSetupWaitMs: Long = SETUP_WAIT_MS
 
@@ -124,7 +134,7 @@ object ConnectionSetup {
         } ?: false
     }
 
-    /** `47 01` came (called by [ConnectionKeepAlive.onSetup]). */
+    /** `47 01` came (called by this link's [ConnectionKeepAlive.onSetup]). */
     fun onWatchSetupDone() {
         watchSetupDone = true
     }
@@ -132,7 +142,7 @@ object ConnectionSetup {
     fun reset() {
         watchSetupDone = false
         lastKind = null
-        org.avmedia.gshockapi.io.ButtonPressedIO.forgetAnswer()
+        runCatching { onReset() }
         deferredKind = null
         step = Step.WAIT_KIND
         reconnectKind = false
@@ -167,32 +177,18 @@ object ConnectionSetup {
             return
         }
         step = Step.WAIT_11
-        ConnectionKeepAlive.writer.request(CODE_BLE)
-    }
-
-    /**
-     * The value written back after reading [code]: `0x11` with bit 2 of value index 4 cleared, `0x3A` with value index 7 and 8 set
-     * to `DC 05`, every other value as read. Used by the connection setup and by the LifeLog setup, so both write the same bytes.
-     */
-    fun writeBackValue(code: Int, reply: ByteArray): ByteArray {
-        val b = reply.copyOf()
-        if (code == CODE_BLE && b.size >= 6) b[5] = (b[5].toInt() and 0x04.inv()).toByte()
-        if (code == CODE_3A && b.size >= 10) {
-            b[8] = 0xDC.toByte()
-            b[9] = 0x05
-        }
-        return b
+        keepAlive.writer.request(CODE_BLE)
     }
 
     fun onBle(data: String) {
         if (step != Step.WAIT_11) return
         val b = bytes(data)
         if (b.size < 6 || b[0] != CODE_BLE) return
-        ConnectionKeepAlive.writer.writeAllFeatures(writeBackValue(CODE_BLE, b.map { it.toByte() }.toByteArray()))
+        keepAlive.writer.writeAllFeatures(writeBackValue(CODE_BLE, b.map { it.toByte() }.toByteArray()))
         ConnectionKeepAlive.log("0x11 written with bit 2 of byte 4 cleared")
         if (reconnectKind) {
             step = Step.WAIT_3B
-            ConnectionKeepAlive.writer.request(CODE_3B)
+            keepAlive.writer.request(CODE_3B)
         } else {
             nextName()
         }
@@ -201,25 +197,25 @@ object ConnectionSetup {
     /** Every kind: read the watch name and write it back, on every connection. */
     private fun nextName() {
         step = Step.WAIT_23
-        ConnectionKeepAlive.writer.request(CODE_NAME)
+        keepAlive.writer.request(CODE_NAME)
     }
 
     fun on23(data: String) {
         if (step != Step.WAIT_23) return
         val b = bytes(data)
         if (b.firstOrNull() != CODE_NAME) return
-        ConnectionKeepAlive.writer.writeAllFeatures(b.map { it.toByte() }.toByteArray())
+        keepAlive.writer.writeAllFeatures(b.map { it.toByte() }.toByteArray())
         ConnectionKeepAlive.log("0x23 name written back")
         if (selfConnect) {
             step = Step.WAIT_39
             for (code in listOf(0x26, CODE_CONDITION, 0x20, CODE_CONDITION, CODE_TIME_MANAGER)) {
-                ConnectionKeepAlive.writer.request(code)
+                keepAlive.writer.request(code)
             }
             ConnectionKeepAlive.log("read 0x26, 0x28, 0x20, 0x28, 0x39; waiting for the 0x39 value")
             return
         }
         step = Step.DONE
-        ConnectionKeepAlive.writer.request(CODE_CONDITION)
+        keepAlive.writer.request(CODE_CONDITION)
         ConnectionKeepAlive.log("0x28 watch condition requested")
         timeWriter()
         ConnectionKeepAlive.log("time and DST write started")
@@ -229,17 +225,17 @@ object ConnectionSetup {
         if (step != Step.WAIT_3B) return
         val b = bytes(data)
         if (b.firstOrNull() != CODE_3B) return
-        ConnectionKeepAlive.writer.writeAllFeatures(b.map { it.toByte() }.toByteArray())
+        keepAlive.writer.writeAllFeatures(b.map { it.toByte() }.toByteArray())
         ConnectionKeepAlive.log("0x3B written back unchanged")
         step = Step.WAIT_3A
-        ConnectionKeepAlive.writer.request(CODE_3A)
+        keepAlive.writer.request(CODE_3A)
     }
 
     fun on3a(data: String) {
         if (step != Step.WAIT_3A) return
         val b = bytes(data)
         if (b.size < 10 || b[0] != CODE_3A) return
-        ConnectionKeepAlive.writer.writeAllFeatures(writeBackValue(CODE_3A, b.map { it.toByte() }.toByteArray()))
+        keepAlive.writer.writeAllFeatures(writeBackValue(CODE_3A, b.map { it.toByte() }.toByteArray()))
         ConnectionKeepAlive.log("0x3A written with bytes 7 and 8 set to DC 05")
         nextName()
     }
@@ -266,7 +262,7 @@ object ConnectionSetup {
     private fun timeUpdate() {
         ConnectionKeepAlive.log("leap-second write 25 18 18 17 20 01 01 skipped (values not confirmed)")
         timeWriter()
-        ConnectionKeepAlive.writer.request(CODE_CONDITION)
+        keepAlive.writer.request(CODE_CONDITION)
         ConnectionKeepAlive.log("time update: time and DST write started, 0x28 requested")
     }
 
@@ -285,7 +281,7 @@ object ConnectionSetup {
     }
 
     private fun answer(value: Int) {
-        ConnectionKeepAlive.writer.writeAllFeatures(byteArrayOf(CODE_TIME_MANAGER.toByte(), value.toByte()))
+        keepAlive.writer.writeAllFeatures(byteArrayOf(CODE_TIME_MANAGER.toByte(), value.toByte()))
         ConnectionKeepAlive.log("39 %02X written".format(value))
         if (value != 3) {
             step = Step.DONE

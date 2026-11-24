@@ -4,7 +4,6 @@ import android.os.Build
 import androidx.annotation.RequiresApi
 import org.avmedia.gshockapi.casio.CasioConstants
 import org.avmedia.gshockapi.casio.ConnectionKeepAlive
-import org.avmedia.gshockapi.casio.ConnectionSetup
 import org.avmedia.gshockapi.casio.NotificationGate
 import org.avmedia.gshockapi.io.H5600Channel
 import org.avmedia.gshockapi.io.H5600HealthIO
@@ -50,11 +49,11 @@ object H5600Protocol : StandardProtocol() {
             super.dataReceivedHandlers -
                 CasioConstants.CHARACTERISTICS.CASIO_ACTIVITY_RECORD.code +
                 mapOf(
-                    ConnectionKeepAlive.CHECK to ConnectionKeepAlive::onCheck,
-                    ConnectionKeepAlive.SETUP to ConnectionKeepAlive::onSetup,
+                    ConnectionKeepAlive.CHECK to org.avmedia.gshockapi.casio.WatchLink.connection.keepAlive::onCheck,
+                    ConnectionKeepAlive.SETUP to org.avmedia.gshockapi.casio.WatchLink.connection.keepAlive::onSetup,
                     0x3D to NotificationGate::onManager,
-                    0x3A to ConnectionSetup::on3a,
-                    0x3B to ConnectionSetup::on3b,
+                    0x3A to org.avmedia.gshockapi.casio.WatchLink.connection.setup::on3a,
+                    0x3B to org.avmedia.gshockapi.casio.WatchLink.connection.setup::on3b,
                     H5600Channel.DRSP.key to { d: String -> if (TideTransferIO.isActive) TideTransferIO.onDrsp(d) else if (H5600WorkoutIO.isActive) H5600WorkoutIO.onDrsp(d) else H5600HealthIO.onDrsp(d) },
                     H5600Channel.CONVOY.key to { d: String -> if (TideTransferIO.isActive) TideTransferIO.onConvoy(d) else if (H5600WorkoutIO.isActive) H5600WorkoutIO.onConvoy(d) else H5600HealthIO.onConvoy(d) },
                     H5600Channel.STATUS.key to H5600HealthIO::onStatus,
@@ -68,11 +67,11 @@ object H5600Protocol : StandardProtocol() {
         val condition = handlers[CasioConstants.CHARACTERISTICS.CASIO_WATCH_CONDITION.code]
         val name = handlers[CasioConstants.CHARACTERISTICS.CASIO_WATCH_NAME.code]
         return handlers + mapOf<Int, (String) -> Unit>(
-            CasioConstants.CHARACTERISTICS.CASIO_WATCH_CONDITION.code to { d -> condition?.invoke(d); ConnectionSetup.on28(d); NotificationGate.onCondition(d) },
-            CasioConstants.CHARACTERISTICS.CASIO_CURRENT_TIME_MANAGER.code to ConnectionSetup::on39,
-            CasioConstants.CHARACTERISTICS.CASIO_WATCH_NAME.code to { d -> name?.invoke(d); ConnectionSetup.on23(d) },
-            CasioConstants.CHARACTERISTICS.CASIO_BLE_FEATURES.code to { d -> kind?.invoke(d); ConnectionSetup.onKind(d) },
-            CasioConstants.CHARACTERISTICS.CASIO_SETTING_FOR_BLE.code to { d -> ble?.invoke(d); ConnectionSetup.onBle(d) },
+            CasioConstants.CHARACTERISTICS.CASIO_WATCH_CONDITION.code to { d -> condition?.invoke(d); org.avmedia.gshockapi.casio.WatchLink.connection.setup.on28(d); NotificationGate.onCondition(d) },
+            CasioConstants.CHARACTERISTICS.CASIO_CURRENT_TIME_MANAGER.code to org.avmedia.gshockapi.casio.WatchLink.connection.setup::on39,
+            CasioConstants.CHARACTERISTICS.CASIO_WATCH_NAME.code to { d -> name?.invoke(d); org.avmedia.gshockapi.casio.WatchLink.connection.setup.on23(d) },
+            CasioConstants.CHARACTERISTICS.CASIO_BLE_FEATURES.code to { d -> kind?.invoke(d); org.avmedia.gshockapi.casio.WatchLink.connection.setup.onKind(d) },
+            CasioConstants.CHARACTERISTICS.CASIO_SETTING_FOR_BLE.code to { d -> ble?.invoke(d); org.avmedia.gshockapi.casio.WatchLink.connection.setup.onBle(d) },
         )
     }
 }

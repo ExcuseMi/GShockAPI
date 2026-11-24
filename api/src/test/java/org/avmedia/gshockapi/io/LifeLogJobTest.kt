@@ -1,5 +1,6 @@
 package org.avmedia.gshockapi.io
 
+import org.avmedia.gshockapi.casio.singleSetup
 import java.util.concurrent.CopyOnWriteArrayList
 import java.util.concurrent.atomic.AtomicReference
 import kotlinx.coroutines.CoroutineScope
@@ -12,7 +13,6 @@ import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
 import org.avmedia.gshockapi.ble.GetSetMode
 import org.avmedia.gshockapi.casio.CasioConstants
-import org.avmedia.gshockapi.casio.ConnectionSetup
 import org.avmedia.gshockapi.casio.Outcome
 import org.avmedia.gshockapi.casio.WatchChannel
 import org.avmedia.gshockapi.casio.WatchLink
@@ -105,16 +105,16 @@ class LifeLogJobTest {
 
     @Before fun install() {
         H5600HealthIO.stepCounterSupported = { true }
-        ConnectionSetup.busy = { false }
-        ConnectionSetup.reset()
-        ConnectionSetup.onWatchSetupDone()
+        singleSetup.busy = { false }
+        singleSetup.reset()
+        singleSetup.onWatchSetupDone()
         TestLog.clear()
     }
 
     @After fun restore() {
         H5600HealthIO.stepCounterSupported = { org.avmedia.gshockapi.WatchInfo.hasStepCounter }
         WatchLink.queue = savedQueue
-        ConnectionSetup.reset()
+        singleSetup.reset()
     }
 
     @Test fun aTapDuringA30BlockLifeLogStreamRunsWithinOneBlockAndTheStreamGoesOnWithoutLoss() = runBlocking {
