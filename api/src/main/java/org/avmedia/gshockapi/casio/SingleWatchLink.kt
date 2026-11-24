@@ -4,7 +4,6 @@ import java.util.UUID
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
-import kotlinx.coroutines.launch
 import org.avmedia.gshockapi.ble.GetSetMode
 import kotlinx.coroutines.Deferred
 import org.avmedia.gshockapi.link.JobOutcome
@@ -50,20 +49,16 @@ object WatchLink {
     val button: org.avmedia.gshockapi.io.LinkButtonInfo get() = link.button
     val rawSettings: org.avmedia.gshockapi.io.LinkRawSettings get() = link.rawSettings
 
+    /** The one link's time, for the single-watch time code ([org.avmedia.gshockapi.io.TimeIO] and the DST, world city and home time reads). */
+    val time: org.avmedia.gshockapi.io.LinkTime get() = link.time
+
     /** The frames the one link's upkeep and setup take, for the single-watch protocol's routing ([org.avmedia.gshockapi.protocols.H5600Protocol]). */
     val connectionRoutes: ConnectionRoutes get() = link.connection.routes
 
-    /** The one link's setup hands its end to the single-watch time code. A link from the registry has none of this. */
+    /** What only the one link has. A link from the registry has none of this. */
     private fun singleWatchHooks(link: org.avmedia.gshockapi.link.WatchLink) {
-        val setup = link.connection.setup
         // The one link's watch is the connected one (a registry link is its key).
         link.transfers.workouts.watch = { link.watchInfo.address }
-        setup.timeWriter = {
-            CoroutineScope(Dispatchers.IO).launch {
-                runCatching { org.avmedia.gshockapi.io.TimeIO.set() }
-                    .onFailure { ConnectionKeepAlive.log("time write failed: ${it.message}") }
-            }
-        }
     }
 
     /**

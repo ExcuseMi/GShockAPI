@@ -2,18 +2,12 @@ package org.avmedia.gshockapi.io
 
 import android.os.Build
 import androidx.annotation.RequiresApi
-import org.avmedia.gshockapi.WatchInfo
-import org.avmedia.gshockapi.ble.Connection
-import org.avmedia.gshockapi.ble.GetSetMode
 import org.avmedia.gshockapi.casio.CasioConstants
 import org.avmedia.gshockapi.casio.CasioTimeZoneHelper
 import org.avmedia.gshockapi.utils.Utils
 import org.json.JSONObject
-import timber.log.Timber
-import java.time.Clock
 import java.time.Instant
 import java.time.LocalDateTime
-import java.util.TimeZone
 
 /*
 When using the API, the app doesn't need to keep a list of world cities to set the time on the watch. It can simply provide the current timezone
@@ -161,25 +155,12 @@ object TimeIOFunctional {
     }
 }
 
+/** The single-watch time: the [LinkTime] of the one link. New code uses `link.time`. */
 @RequiresApi(Build.VERSION_CODES.O)
 object TimeIO {
-    private data class State(
-        val timeZone: String = TimeZone.getDefault().id,
-        val casioTimezone: CasioTimeZoneHelper.CasioTimeZone =
-            CasioTimeZoneHelper.findTimeZone(
-                TimeZone.getDefault().id,
-            ),
-    )
+    private val time: LinkTime get() = org.avmedia.gshockapi.casio.WatchLink.time
 
-    private var state = State()
-
-    fun setTimezone(timeZone: String) {
-        state =
-            state.copy(
-                timeZone = timeZone,
-                casioTimezone = CasioTimeZoneHelper.findTimeZone(timeZone),
-            )
-    }
+    fun setTimezone(timeZone: String) = time.setTimezone(timeZone)
 
     /**
      * Exposes the currently-configured CasioTimeZone so watch-specific
@@ -187,139 +168,22 @@ object TimeIO {
      * home-clock timestamp -- coordinates, DST rules -- can read it
      * without threading a wider parameter list through setTime().
      */
-    fun getCasioTimezone(): CasioTimeZoneHelper.CasioTimeZone = state.casioTimezone
+    fun getCasioTimezone(): CasioTimeZoneHelper.CasioTimeZone = time.casioTimezone
 
     suspend fun set(
         timeMs: Long? = null,
         offset: Long? = null,
-    ) {
-        initializeForSettingTime()
-        val timeToSet = timeMs ?: (Clock.systemDefaultZone().millis() + (offset ?: 0L))
+    ) = time.set(timeMs, offset)
 
-        Connection.sendMessage(
-            "{action: \"SET_TIME\", value: $timeToSet}",
-        )
-    }
+    suspend fun writeHomeTimes() = time.writeHomeTimes()
 
-    private suspend fun getDSTWatchState(dstState: IO.DstState): String = DstWatchStateIO.request(dstState)
+    suspend fun writeDST() = time.writeDST()
 
-    private suspend fun getDSTWatchStateWithTZ(dstState: IO.DstState): String {
-        val origDTS = getDSTWatchState(dstState)
-        val dstValue = TimeIOFunctional.calculateDSTValue(state.casioTimezone)
-        return DstWatchStateIO.setDST(origDTS, dstValue)
-    }
+    suspend fun writeDSTForWorldCities() = time.writeDSTForWorldCities()
 
-    private suspend fun getDSTForWorldCities(cityNum: Int): String = DstForWorldCitiesIO.request(cityNum)
-
-    private suspend fun getDSTForWorldCitiesWithTZ(cityNum: Int): String {
-        val origDSTForCity = getDSTForWorldCities(cityNum)
-        return DstForWorldCitiesIO.setDST(origDSTForCity, state.casioTimezone)
-    }
-
-    private suspend fun getWorldCities(cityNum: Int): String = WorldCitiesIO.request(cityNum)
-
-    private suspend fun getWorldCitiesWithTZ(cityNum: Int): String {
-        val newCity = WorldCitiesIO.parseCity(state.timeZone)
-        val encoded = WorldCitiesIO.encodeAndPad(newCity!!, cityNum)
-        IO.removeFromCache(encoded)
-        return encoded
-    }
-
-    /**
-     * This function is internally called by [set] to initialize some values.
-     */
-    private suspend fun initializeForSettingTime() {
-        writeDST()
-        writeDSTForWorldCities()
-        if (WatchInfo.hasWorldCities) {
-            writeWorldCities()
-        } else if (WatchInfo.hasHomeTime) {
-            writeHomeTimes()
-        }
-    }
-
-    suspend fun writeHomeTimes() {
-        for (i in 0 until WatchInfo.worldCitiesCount) {
-            readAndWrite({ slot -> HomeTimeIO.requestRaw(slot) }, i)
-            Timber.i("writeHomeTimes: $i")
-        }
-    }
-
-    suspend fun <T> readAndWrite(
-        function: suspend (T) -> String,
-        param: T,
-    ) {
-        val ret: String = function(param)
-        val shortStr = Utils.toCompactString(ret)
-        IO.writeCmd(GetSetMode.SET, shortStr)
-    }
-
-    suspend fun writeDST() {
-        data class Dts(
-            val param: IO.DstState,
-            val function: suspend (IO.DstState) -> String,
-        )
-
-        val dtsStates =
-            arrayOf(
-                Dts(IO.DstState.ZERO) { dstState -> getDSTWatchStateWithTZ(dstState) },
-                Dts(IO.DstState.TWO) { dstState -> getDSTWatchState(dstState) },
-                Dts(IO.DstState.FOUR) { dstState -> getDSTWatchState(dstState) },
-            )
-
-        for (i in 0 until WatchInfo.dstCount) {
-            readAndWrite(dtsStates[i].function, dtsStates[i].param)
-        }
-    }
-
-    suspend fun writeDSTForWorldCities() {
-        data class DstForWorldCities(
-            val param: Int,
-            val function: suspend (Int) -> String,
-        )
-
-        val dstForWorldCities =
-            arrayOf(
-                DstForWorldCities(0) { cityNumber: Int -> getDSTForWorldCitiesWithTZ(cityNumber) },
-                DstForWorldCities(1) { cityNumber: Int -> getDSTForWorldCities(cityNumber) },
-                DstForWorldCities(2) { cityNumber: Int -> getDSTForWorldCities(cityNumber) },
-                DstForWorldCities(3) { cityNumber: Int -> getDSTForWorldCities(cityNumber) },
-                DstForWorldCities(4) { cityNumber: Int -> getDSTForWorldCities(cityNumber) },
-                DstForWorldCities(5) { cityNumber: Int -> getDSTForWorldCities(cityNumber) },
-            )
-
-        for (i in 0 until WatchInfo.worldCitiesCount) {
-            readAndWrite(dstForWorldCities[i].function, dstForWorldCities[i].param)
-            Timber.i("writeDSTForWorldCities: $i")
-        }
-    }
-
-    suspend fun writeWorldCities() {
-        data class WorldCities(
-            val param: Int,
-            val function: suspend (Int) -> String,
-        )
-
-        val worldCities =
-            arrayOf(
-                WorldCities(0) { cityNumber: Int -> getWorldCitiesWithTZ(cityNumber) },
-                WorldCities(1) { cityNumber: Int -> getWorldCities(cityNumber) },
-                WorldCities(2) { cityNumber: Int -> getWorldCities(cityNumber) },
-                WorldCities(3) { cityNumber: Int -> getWorldCities(cityNumber) },
-                WorldCities(4) { cityNumber: Int -> getWorldCities(cityNumber) },
-                WorldCities(5) { cityNumber: Int -> getWorldCities(cityNumber) },
-            )
-
-        for (i in 0 until WatchInfo.worldCitiesCount) {
-            readAndWrite(worldCities[i].function, worldCities[i].param)
-            Timber.i("writeWorldCities: $i")
-        }
-    }
+    suspend fun writeWorldCities() = time.writeWorldCities()
 
     fun sendToWatchSet(message: String) {
-        val dateTimeMs: Long = JSONObject(message).get("value") as Long
-        val adjustedDateTime = TimeIOFunctional.adjustTimeForDSTAndConvert(dateTimeMs, state.casioTimezone)
-        val timeCommand = TimeIOFunctional.buildTimeCommand(adjustedDateTime)
-        IO.writeCmd(GetSetMode.SET, timeCommand)
+        time.writeTime(JSONObject(message).get("value") as Long)
     }
 }

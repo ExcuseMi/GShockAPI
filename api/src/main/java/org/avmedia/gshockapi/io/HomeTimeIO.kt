@@ -2,7 +2,6 @@ package org.avmedia.gshockapi.io
 
 import android.os.Build
 import androidx.annotation.RequiresApi
-import kotlinx.coroutines.CompletableDeferred
 import org.avmedia.gshockapi.WatchInfo
 import org.avmedia.gshockapi.utils.Utils
 
@@ -39,40 +38,15 @@ object HomeTimeIOFunctional {
 // ============================================================================
 
 /**
- * Home Time IO handler with state management.
- *
- * Provides access to the primary home city timezone (Register 0x24).
- * Uses pure functional core for data parsing.
+ * The single-watch home time (register 0x24): the one link's [LinkTime]. New code uses `link.time`.
  */
 @RequiresApi(Build.VERSION_CODES.O)
 object HomeTimeIO {
-    private data class State(
-        val deferredResult: CompletableDeferred<String>? = null,
-    )
-
-    private var state = State()
-
     suspend fun request(): String {
         return WatchInfo.protocol.getHomeTime()
     }
 
-    suspend fun requestRaw(slot: Int): String {
-        val key = "240$slot"
+    suspend fun requestRaw(slot: Int): String = org.avmedia.gshockapi.casio.WatchLink.time.requestHomeTime(slot)
 
-        return CachedIO.request(key) { k ->
-            val deferred = CompletableDeferred<String>()
-            synchronized(this) {
-                state = state.copy(deferredResult = deferred)
-            }
-            IO.request(k)
-            deferred.await()
-        }
-    }
-
-    fun onReceived(data: String) {
-        synchronized(this) {
-            state.deferredResult?.complete(data)
-            state = state.copy(deferredResult = null)
-        }
-    }
+    fun onReceived(data: String) = org.avmedia.gshockapi.casio.WatchLink.time.onHomeTime(data)
 }

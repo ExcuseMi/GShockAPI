@@ -142,8 +142,8 @@ class LinkSourceCheckTest {
      * their link.
      */
     @Test fun thePerLinkWatchStateReachesOnlyItsLink() {
-        val perLink = setOf("LinkWatchInfo.kt", "LinkCache.kt", "LinkButtonInfo.kt", "LinkRawSettings.kt")
-        val single = Regex("""\bcasio\.WatchLink\b|import org\.avmedia\.gshockapi\.casio\.WatchLink\b|(?<![\w.])WatchLink\.(?!kt)\w+|\b(CachedIO|ButtonPressedIO|RawSettingIO|NotificationGate)\.|\bIO\.(?!(WatchButton|DstState)\b)\w+|\bWatchInfo\.(?!(State|ModelInfo|WatchModel|buildState)\b)\w+""")
+        val perLink = setOf("LinkWatchInfo.kt", "LinkCache.kt", "LinkButtonInfo.kt", "LinkRawSettings.kt", "LinkTime.kt")
+        val single = Regex("""\bcasio\.WatchLink\b|import org\.avmedia\.gshockapi\.casio\.WatchLink\b|(?<![\w.])WatchLink\.(?!kt)\w+|\b(CachedIO|ButtonPressedIO|RawSettingIO|NotificationGate|TimeIO|DstWatchStateIO|DstForWorldCitiesIO|WorldCitiesIO|HomeTimeIO)\.|\bIO\.(?!(WatchButton|DstState)\b)\w+|\bWatchInfo\.(?!(State|ModelInfo|WatchModel|buildState)\b)\w+""")
         val found = sources().filter { it.name in perLink }
         assertEquals("the per-link files are found", perLink, found.map { it.name }.toSet())
         val bad = found.filter { single.containsMatchIn(it.readText()) }.map { "${it.name}: ${single.find(it.readText())!!.value}" }
@@ -154,7 +154,7 @@ class LinkSourceCheckTest {
                 assertFalse("${f.name}: a var in a companion", Regex("""\bvar\b""").containsMatchIn(body.substring(0, closing(body))))
             }
         }
-        only("per-link watch state made", Regex("""(?<!class )\b(LinkWatchInfo|LinkCache|LinkButtonInfo|LinkRawSettings)\("""), setOf("WatchLink.kt"))
+        only("per-link watch state made", Regex("""(?<!class )\b(LinkWatchInfo|LinkCache|LinkButtonInfo|LinkRawSettings|LinkTime)\("""), setOf("WatchLink.kt"))
         only("a link's setting wire made", Regex("""(?<!class )\bLinkSettingWire\("""), setOf("LinkRawSettings.kt"))
         only("a link's connection routes made", Regex("""(?<!class )\bConnectionRoutes\("""), setOf("ConnectionKeepAlive.kt"))
     }
@@ -163,9 +163,22 @@ class LinkSourceCheckTest {
     @Test fun theSingleWatchStateIsUsedOnlyByItsAdapters() =
         only(
             "the single-watch watch info, cache, button info, settings reads or routes",
-            Regex("""\bWatchLink\.(watchInfo|cache|button|rawSettings|connectionRoutes)\b"""),
-            setOf("WatchInfo.kt", "CachedIO.kt", "ButtonPressedIO.kt", "RawSettingIO.kt", "H5600Protocol.kt"),
+            Regex("""\bWatchLink\.(watchInfo|cache|button|rawSettings|connectionRoutes|time)\b"""),
+            setOf(
+                "WatchInfo.kt", "CachedIO.kt", "ButtonPressedIO.kt", "RawSettingIO.kt", "H5600Protocol.kt",
+                "TimeIO.kt", "DstWatchStateIO.kt", "DstForWorldCitiesIO.kt", "WorldCitiesIO.kt", "HomeTimeIO.kt",
+            ),
         )
+
+    /** The single-watch time code holds nothing of a watch: no answer it waits for, no time zone; the link's [org.avmedia.gshockapi.io.LinkTime] does. */
+    @Test fun theSingleWatchTimeHoldsNoState() {
+        val adapters = setOf("TimeIO.kt", "DstWatchStateIO.kt", "DstForWorldCitiesIO.kt", "WorldCitiesIO.kt", "HomeTimeIO.kt")
+        val found = sources().filter { it.name in adapters }
+        assertEquals("the time adapters are found", adapters, found.map { it.name }.toSet())
+        val state = Regex("""CompletableDeferred|\bvar\b|\bCachedIO\.|\bIO\.(request|writeCmd)\(|Connection\.sendMessage""")
+        val bad = found.filter { state.containsMatchIn(it.readText()) }.map { "${it.name}: ${state.find(it.readText())!!.value}" }
+        assertTrue("state or a write in the single-watch time code: $bad", bad.isEmpty())
+    }
 
     private fun closing(body: String): Int {
         var depth = 1

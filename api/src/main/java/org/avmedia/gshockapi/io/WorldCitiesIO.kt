@@ -1,9 +1,7 @@
 package org.avmedia.gshockapi.io
 
-import CachedIO
 import android.os.Build
 import androidx.annotation.RequiresApi
-import kotlinx.coroutines.CompletableDeferred
 import org.avmedia.gshockapi.utils.Utils
 
 // ============================================================================
@@ -63,39 +61,13 @@ object WorldCitiesIOFunctional {
 // ============================================================================
 
 /**
- * World Cities IO handler with state management.
- *
- * Manages the asynchronous request/response cycle for world city data.
- * Uses pure functional core for all parsing and encoding operations.
+ * The single-watch world city read: the one link's [LinkTime]. New code uses `link.time`.
  */
 @RequiresApi(Build.VERSION_CODES.O)
 object WorldCitiesIO {
-    private data class State(
-        val deferredResult: CompletableDeferred<String>? = null,
-    )
+    suspend fun request(cityNumber: Int): String = org.avmedia.gshockapi.casio.WatchLink.time.requestWorldCities(cityNumber)
 
-    private var state = State()
-
-    suspend fun request(cityNumber: Int): String = CachedIO.request("1f0$cityNumber") { key -> getWorldCities(key) }
-
-    private suspend fun getWorldCities(key: String): String {
-        val deferred = CompletableDeferred<String>()
-        synchronized(this) {
-            state = state.copy(deferredResult = deferred)
-        }
-        IO.request(key)
-        return deferred.await()
-    }
-
-    fun onReceived(data: String) {
-        synchronized(this) {
-            val currentDeferred = state.deferredResult
-            currentDeferred?.complete(data)
-            if (state.deferredResult === currentDeferred) {
-                state = state.copy(deferredResult = null)
-            }
-        }
-    }
+    fun onReceived(data: String) = org.avmedia.gshockapi.casio.WatchLink.time.onWorldCities(data)
 
     /**
      * Pure function for city name parsing.

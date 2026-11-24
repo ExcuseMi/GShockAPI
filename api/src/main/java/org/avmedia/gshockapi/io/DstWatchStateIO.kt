@@ -1,7 +1,5 @@
 package org.avmedia.gshockapi.io
 
-import CachedIO
-import kotlinx.coroutines.CompletableDeferred
 import org.avmedia.gshockapi.utils.Utils
 
 // ============================================================================
@@ -37,26 +35,9 @@ object DstWatchStateIOFunctional {
     }
 }
 
+/** The single-watch DST read: the one link's [LinkTime]. New code uses `link.time`. */
 object DstWatchStateIO {
-    private data class State(
-        val deferredResult: CompletableDeferred<String>? = null,
-    )
-
-    private var state = State()
-
-    suspend fun request(state: IO.DstState): String =
-        CachedIO.request("1d0${state.state}") { key ->
-            getDSTWatchState(key)
-        }
-
-    private suspend fun getDSTWatchState(key: String): String {
-        val deferred = CompletableDeferred<String>()
-        synchronized(this) {
-            state = state.copy(deferredResult = deferred)
-        }
-        IO.request(key)
-        return deferred.await()
-    }
+    suspend fun request(state: IO.DstState): String = org.avmedia.gshockapi.casio.WatchLink.time.requestDstWatchState(state)
 
     /*
     There are six clocks on the Casio GW-B5600
@@ -74,13 +55,5 @@ object DstWatchStateIO {
         dst: Int,
     ): String = DstWatchStateIOFunctional.setDST(dstState, dst)
 
-    fun onReceived(data: String) {
-        synchronized(this) {
-            val currentDeferred = state.deferredResult
-            currentDeferred?.complete(data)
-            if (state.deferredResult === currentDeferred) {
-                state = state.copy(deferredResult = null)
-            }
-        }
-    }
+    fun onReceived(data: String) = org.avmedia.gshockapi.casio.WatchLink.time.onDstWatchState(data)
 }

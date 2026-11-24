@@ -6,10 +6,12 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Deferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.flow.StateFlow
 import org.avmedia.gshockapi.LinkWatchInfo
 import org.avmedia.gshockapi.ble.GetSetMode
 import org.avmedia.gshockapi.casio.ConnectionContext
+import org.avmedia.gshockapi.casio.ConnectionKeepAlive
 import org.avmedia.gshockapi.casio.LinkNotifications
 import org.avmedia.gshockapi.casio.LinkWriter
 import org.avmedia.gshockapi.casio.Outcome
@@ -19,6 +21,7 @@ import org.avmedia.gshockapi.casio.WatchTransport
 import org.avmedia.gshockapi.io.LinkButtonInfo
 import org.avmedia.gshockapi.io.LinkCache
 import org.avmedia.gshockapi.io.LinkRawSettings
+import org.avmedia.gshockapi.io.LinkTime
 import org.avmedia.gshockapi.io.LinkTransfers
 
 /** The GATT of one watch: writes, and the notification subscriptions the setup makes. A fake in the tests. */
@@ -64,6 +67,9 @@ class WatchLink internal constructor(
     /** This link's settings reads and writes (the raw table): its own request in flight and its own locks. */
     val rawSettings: LinkRawSettings = LinkRawSettings(this)
 
+    /** This link's time: its time zone, its DST, world city and home time reads and the time write. */
+    val time: LinkTime = LinkTime(this)
+
     /** This link's LifeLog and workout transfers: what runs, waits or failed on them is this watch's alone. */
     val transfers: LinkTransfers = LinkTransfers(this)
 
@@ -75,6 +81,12 @@ class WatchLink internal constructor(
         connection.setup.afterSetup = { transfers.workouts.onSetupDone(it) }
         // A new setup asks for the button info again: an answer of the last connection is not this one's.
         connection.setup.onReset = { button.forgetAnswer() }
+        // The end of the setup writes this watch's own time and DST values.
+        connection.setup.timeWriter = {
+            scope.launch {
+                runCatching { time.set() }.onFailure { ConnectionKeepAlive.log("time write failed: ${it.message}") }
+            }
+        }
     }
 
     /** One request or write as a command job (fire and forget unless the result is awaited). */

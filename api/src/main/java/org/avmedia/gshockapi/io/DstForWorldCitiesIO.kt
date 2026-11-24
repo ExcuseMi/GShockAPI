@@ -1,9 +1,7 @@
 package org.avmedia.gshockapi.io
 
-import CachedIO
 import android.os.Build
 import androidx.annotation.RequiresApi
-import kotlinx.coroutines.CompletableDeferred
 import org.avmedia.gshockapi.casio.CasioTimeZoneHelper
 import org.avmedia.gshockapi.utils.Utils
 
@@ -48,26 +46,9 @@ object DstForWorldCitiesIOFunctional {
 }
 
 @RequiresApi(Build.VERSION_CODES.O)
+/** The single-watch read: the one link's [LinkTime]. New code uses `link.time`. */
 object DstForWorldCitiesIO {
-    private data class State(
-        val deferredResult: CompletableDeferred<String>? = null,
-    )
-
-    private var state = State()
-
-    suspend fun request(cityNumber: Int): String =
-        CachedIO.request("1e0$cityNumber") { key ->
-            getDSTForWorldCities(key)
-        }
-
-    private suspend fun getDSTForWorldCities(key: String): String {
-        val deferred = CompletableDeferred<String>()
-        synchronized(this) {
-            state = state.copy(deferredResult = deferred)
-        }
-        IO.request(key)
-        return deferred.await()
-    }
+    suspend fun request(cityNumber: Int): String = org.avmedia.gshockapi.casio.WatchLink.time.requestDstForWorldCities(cityNumber)
 
     /*
     0x1e 0-5 TZ_A TZ_B TZ_OFF TZ_DSTOFF TZ_DSTRULES
@@ -87,13 +68,5 @@ object DstForWorldCitiesIO {
         casioTimeZone: CasioTimeZoneHelper.CasioTimeZone,
     ): String = DstForWorldCitiesIOFunctional.setDST(dst, casioTimeZone)
 
-    fun onReceived(data: String) {
-        synchronized(this) {
-            val currentDeferred = state.deferredResult
-            currentDeferred?.complete(data)
-            if (state.deferredResult === currentDeferred) {
-                state = state.copy(deferredResult = null)
-            }
-        }
-    }
+    fun onReceived(data: String) = org.avmedia.gshockapi.casio.WatchLink.time.onDstForWorldCities(data)
 }
