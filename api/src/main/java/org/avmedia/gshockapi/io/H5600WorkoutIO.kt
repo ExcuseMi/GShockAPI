@@ -17,11 +17,12 @@ import org.avmedia.gshockapi.ble.GetSetMode
 import org.avmedia.gshockapi.casio.CasioConstants
 import org.avmedia.gshockapi.casio.WatchLink
 import org.avmedia.gshockapi.link.JobOutcome
+import org.avmedia.gshockapi.link.JobScope
 import org.avmedia.gshockapi.model.WorkoutSession
 import timber.log.Timber
 
 /**
- * Downloads the workouts of a DW-H5600 through the shared exchange lock.
+ * Downloads the workouts of a DW-H5600 as a background job on the link (or inside the LifeLog job, before its START).
  *
  * The app sets [sink] (store the workout; true when stored) and may collect [workouts] to be told about each new one.
  * Without a sink nothing is downloaded, so nothing is marked as fetched that nobody keeps. A workout is delivered
@@ -135,7 +136,7 @@ object H5600WorkoutIO {
     }
 
     /**
-     * One download run; waits for the exchange lock (and says so). Returns the number of workouts stored, or null when it did not run.
+     * One download run as its own job; waits for its turn on the link (and says so when another job holds it). Returns the number of workouts stored, or null when it did not run.
      * [userAsked] = the button: it always runs; an automatic read is skipped while another one runs or waits, and for
      * [RETRY_AFTER_FAIL_MS] after a failed one.
      */
@@ -145,16 +146,8 @@ object H5600WorkoutIO {
         if (!userAsked && !automaticPending.compareAndSet(false, true)) return null.also { log("Workout read not started: one is already running or waiting") }
         try {
             if (!userAsked) backedOff()?.let { log(it); return null }
-            if (!WatchExchange.mutex.tryLock()) {
-                log("Workout read waits: another exchange (a LifeLog or settings read) holds the link")
-                WatchExchange.mutex.lock()
-                log("Workout read: the link is free")
-            }
-            try {
-                return downloadHeld(userAsked, asJob = true)
-            } finally {
-                WatchExchange.mutex.unlock()
-            }
+            if (WatchLink.busy()) log("Workout read waits: another job (a LifeLog or settings read) holds the link")
+            return downloadHeld(userAsked)
         } finally {
             if (!userAsked) automaticPending.set(false)
         }
@@ -178,7 +171,7 @@ object H5600WorkoutIO {
     }
 
     /**
-     * Inside a LifeLog read (exchange lock held), before its START: when its `0x28` answer flags workouts (index 6 is 1 or 2)
+     * Inside a LifeLog read (its job), before its START: when its `0x28` answer flags workouts (index 6 is 1 or 2)
      * they are read first ([run], normally [downloadHeld]): workouts first, then the LifeLog.
      * With a workout waiting (`0x28` index 6 = 1) the watch does not answer a LifeLog START.
      * True when the workouts were read (or tried): the read after the LifeLog is then left out.
@@ -199,10 +192,10 @@ object H5600WorkoutIO {
     }
 
     /**
-     * One download run for a caller that holds [WatchExchange.mutex]: the LifeLog read runs it before its START when `0x28`
-     * flags workouts (workouts first, then the LifeLog).
+     * One download run. With [job] (the LifeLog read runs it before its START when `0x28` flags workouts: workouts first,
+     * then the LifeLog) it runs inside that job; without, as its own job on the link.
      */
-    suspend fun downloadHeld(userAsked: Boolean = false, asJob: Boolean = false): WorkoutRunResult? {
+    suspend fun downloadHeld(userAsked: Boolean = false, job: JobScope? = null): WorkoutRunResult? {
         val store = sink ?: return null.also { log("Workout read not started: the app keeps no workouts") }
         if (!userAsked) backedOff()?.let { log(it); return null }
         if (!running.compareAndSet(false, true)) return null.also { log("Workout read not started: one is already running") }
@@ -220,12 +213,12 @@ object H5600WorkoutIO {
         try {
             _status.value = "Downloading workouts"
             lastError = null
-            var result = runOnce(store, asJob)
+            var result = runOnce(store, job)
             if (result.failReason != null) {
                 // `03 01` at the start came while the watch ran another exchange: once more after it ended.
                 log("Workout read: the watch refused the start (fail reason ${result.failReason}), trying once more after the exchange")
                 delay(START_RETRY_MS)
-                result = runOnce(store, asJob)
+                result = runOnce(store, job)
             }
             lastError = result.error
             if (result.error == null) lastFail.remove(watch()) else lastFail[watch()] = clock()
@@ -249,34 +242,29 @@ object H5600WorkoutIO {
     internal const val START_RETRY_MS = 3_000L
 
     /**
-     * One transfer run. It starts only when no settings or time exchange runs (a start during one was refused or answered
-     * busy); while it waits the link is free for them ([inbox] is null, so they do not wait for us).
+     * One transfer run. As its own job it starts only after the quiet that follows a command or a transfer (a start
+     * during a time exchange, or 5 ms after a LifeLog read, was refused or answered busy); while it waits the link is free
+     * for others, and [inbox] is set only once it holds the link (until then the watch's messages are not ours).
      */
-    private suspend fun runOnce(store: suspend (WorkoutSession) -> Boolean, asJob: Boolean): WorkoutRunResult {
+    private suspend fun runOnce(store: suspend (WorkoutSession) -> Boolean, job: JobScope?): WorkoutRunResult {
         inbox = null
-        // The waits run before the transfer takes the link: what they wait for (settings reads) needs the link.
-        WatchExchange.awaitSettledAfterTransfer()
-        WatchExchange.awaitNoSettingsExchange()
         val channel = Channel<WorkoutMsg>(Channel.UNLIMITED)
-        inbox = channel
-        fun transfer(via: WorkoutLink) = WorkoutTransfer(
-            link = via,
-            inbox = channel,
-            sink = { s -> store(s).also { ok -> if (ok) _workouts.emit(s) } },
-            blockCache = blockCache,
-            log = ::log,
-        )
-        val result =
-            if (!asJob) {
-                transfer(link ?: CommandLink).run()
-            } else {
-                // Its own job on the link: it gives way to a tap, a notification or a command after each block chain.
-                when (val out = WatchLink.transfer("workout read", JOB_DEADLINE_MS) { transfer(link ?: JobWorkoutLink(this)).run() }.await()) {
-                    is JobOutcome.Done -> out.value
-                    is JobOutcome.Failed -> WorkoutRunResult(0, "The workout read ended: ${out.detail}")
-                }
-            }
-        return result.also { WatchExchange.onTransferEnded() }
+        fun transfer(via: WorkoutLink): WorkoutTransfer {
+            inbox = channel
+            return WorkoutTransfer(
+                link = via,
+                inbox = channel,
+                sink = { s -> store(s).also { ok -> if (ok) _workouts.emit(s) } },
+                blockCache = blockCache,
+                log = ::log,
+            )
+        }
+        // In a job on the link: it gives way to a tap, a notification or a command after each block chain.
+        if (job != null) return transfer(link ?: JobWorkoutLink(job)).run()
+        return when (val out = WatchLink.transfer("workout read", JOB_DEADLINE_MS, quiet = true) { transfer(link ?: JobWorkoutLink(this)).run() }.await()) {
+            is JobOutcome.Done -> out.value
+            is JobOutcome.Failed -> WorkoutRunResult(0, "The workout read ended: ${out.detail}")
+        }
     }
 
     /** The longest a workout read holds its job (a full watch is a few minutes on the slow link). */
@@ -293,16 +281,9 @@ object H5600WorkoutIO {
         org.avmedia.gshockapi.log.LibraryLog.log(org.avmedia.gshockapi.log.LibraryLog.Source.Workouts, text)
     }
 
-    /** A test seam: a scripted watch in place of the link. Null: the link (the transfer's job, or single writes inside a LifeLog read). */
+    /** A test seam: a scripted watch in place of the link. Null: the link (the transfer's own job, or the LifeLog job). */
     @Volatile
     internal var link: WorkoutLink? = null
-
-    /** Inside a LifeLog read (which holds the exchange lock, not a job): each write is its own command on the link. */
-    private val CommandLink = object : WorkoutLink {
-        override fun drsp(data: ByteArray) = IO.writeCmd(GetSetMode.DATA_REQUEST, data)
-
-        override fun bulk(data: ByteArray) = IO.writeCmd(GetSetMode.CONVOY, data)
-    }
 
     private val DRSP_FIRST = setOf(0x00, 0x03, 0x04, 0x06, 0x07, 0x08, 0x09)
     private const val BULK_LAST = 0x07

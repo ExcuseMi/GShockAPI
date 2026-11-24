@@ -55,7 +55,6 @@ class H5600WorkoutReadGateTest {
         H5600WorkoutIO.setupWaitMs = ConnectionSetup.SETUP_WAIT_MS
         H5600WorkoutIO.resetBackoff()
         ConnectionSetup.reset()
-        if (WatchExchange.mutex.isLocked) WatchExchange.mutex.unlock()
     }
 
     @Test fun noWorkoutRequestBeforeTheWatchSentItsSetupDone() = runBlocking {
@@ -105,13 +104,13 @@ class H5600WorkoutReadGateTest {
 
     @Test fun aSecondAutomaticReadIsNotQueuedBehindAWaitingOne() = runBlocking {
         ConnectionSetup.onWatchSetupDone()
-        WatchExchange.mutex.lock()
+        val release = holdTheLink()
         val first = async(Dispatchers.IO) { H5600WorkoutIO.download() }
         delay(300)
-        // Bounded: queued behind the held lock it would wait for ever (that was the failure).
+        // Bounded: queued behind the job that holds the link it would wait for ever (that was the failure).
         assertNull(withTimeoutOrNull(2_000) { H5600WorkoutIO.download() })
         assertTrue(TestLog.recentEvents().any { it.contains("one is already running or waiting") })
-        WatchExchange.mutex.unlock()
+        release.complete(Unit)
         assertNotNull(withTimeoutOrNull(15_000) { first.await() })
         // One read: its start and the one repeat after `03 01`; no second read behind it.
         assertEquals(2, writes.count { it == "001c0000000000000000" })

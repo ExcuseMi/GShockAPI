@@ -105,7 +105,6 @@ class LifeLogWorkoutsFirstTest {
         H5600HealthIO.workoutsFirst = savedRun
         WatchLink.queue = savedQueue
         ConnectionSetup.reset()
-        if (WatchExchange.mutex.isLocked) WatchExchange.mutex.unlock()
     }
 
     private fun run(condition: ByteArray): Pair<WorkoutHoldingWatch, List<String>> = runBlocking {
@@ -163,10 +162,10 @@ class LifeLogWorkoutsFirstTest {
                 override fun drsp(data: ByteArray) {}
                 override fun bulk(data: ByteArray) {}
             }
-            WatchExchange.mutex.lock()
+            val release = holdTheLink()
             val read = async(Dispatchers.IO) { H5600WorkoutIO.download() }
             delay(300)
-            WatchExchange.mutex.unlock()
+            release.complete(Unit)
             val result = read.await()
             val lines = TestLog.recentEvents().filter { it.contains("Workout read") }
             assertTrue(lines.toString(), result?.error.orEmpty().contains("did not answer the start"))

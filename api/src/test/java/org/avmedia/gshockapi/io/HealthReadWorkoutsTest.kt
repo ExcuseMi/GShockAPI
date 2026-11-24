@@ -124,7 +124,6 @@ class HealthReadWorkoutsTest {
         H5600WorkoutIO.resetBackoff()
         WatchLink.queue = savedQueue
         ConnectionSetup.reset()
-        if (WatchExchange.mutex.isLocked) WatchExchange.mutex.unlock()
     }
 
     /** The scripted workout watch of [FakeWatch], its frames delivered the way the connection delivers them. */

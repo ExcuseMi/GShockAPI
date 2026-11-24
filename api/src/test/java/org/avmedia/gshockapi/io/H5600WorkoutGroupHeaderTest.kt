@@ -89,7 +89,6 @@ class H5600WorkoutGroupHeaderTest {
         H5600WorkoutIO.link = savedLink
         H5600WorkoutIO.resetBackoff()
         ConnectionSetup.reset()
-        if (WatchExchange.mutex.isLocked) WatchExchange.mutex.unlock()
     }
 
     @Test fun theFramesOfTheDumpChecksumAsTheWatchSentThem() {

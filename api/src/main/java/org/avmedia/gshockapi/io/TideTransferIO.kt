@@ -8,7 +8,7 @@ import org.avmedia.gshockapi.link.JobOutcome
 import org.avmedia.gshockapi.casio.ConnectionKeepAlive
 
 /**
- * Sends a port record to a DW-H5600 through the shared exchange lock. Routing of the watch's answers works as for
+ * Sends a port record to a DW-H5600 as a background job on the link. Routing of the watch's answers works as for
  * the workout transfer: while it runs, the H5600 protocol hands bulk and data request notifications to [onDrsp] and [onConvoy].
  */
 @RequiresApi(Build.VERSION_CODES.O)
@@ -29,20 +29,18 @@ object TideTransferIO {
         inbox?.trySend(WorkoutMsg(channel, H5600HealthIO.bytesOf(hex)))
     }
 
-    /** Waits for the exchange lock, then sends [record]. Returns an error text or null when the watch took it. */
+    /** Waits for its turn on the link, then sends [record]. Returns an error text or null when the watch took it. */
     suspend fun send(record: ByteArray): String? {
-        WatchExchange.mutex.lock()
         val channel = Channel<WorkoutMsg>(Channel.UNLIMITED)
         try {
-            inbox = channel
-            // Its own job on the link, taken after the exchange lock: it gives way to more urgent jobs between pieces.
-            return when (val out = WatchLink.transfer("tide transfer", JOB_DEADLINE_MS) { TideTransfer(link ?: JobWorkoutLink(this), channel).run(record).error }.await()) {
+            // Its own job on the link (one transfer at a time): it gives way to more urgent jobs between pieces. The watch's
+            // messages are ours only once the job holds the link.
+            return when (val out = WatchLink.transfer("tide transfer", JOB_DEADLINE_MS) { inbox = channel; TideTransfer(link ?: JobWorkoutLink(this), channel).run(record).error }.await()) {
                 is JobOutcome.Done -> out.value
                 is JobOutcome.Failed -> "The tide transfer ended: ${out.detail}"
             }
         } finally {
             inbox = null
-            WatchExchange.mutex.unlock()
         }
     }
 

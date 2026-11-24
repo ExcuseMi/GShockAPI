@@ -14,6 +14,10 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeoutOrNull
 import org.avmedia.gshockapi.WatchInfo
 import org.avmedia.gshockapi.ble.GetSetMode
+import org.avmedia.gshockapi.casio.WatchLink
+import org.avmedia.gshockapi.link.FailReason
+import org.avmedia.gshockapi.link.JobOutcome
+import org.avmedia.gshockapi.link.JobScope
 import org.avmedia.gshockapi.model.StepCounterData
 import org.avmedia.gshockapi.utils.Utils
 import timber.log.Timber
@@ -23,10 +27,11 @@ import kotlin.time.Duration.Companion.milliseconds
 /**
  * Imperative shell for the DW-H5600 LifeLog transfer.
  *
- * Runs one transfer at a time. Notifications arrive through [onDrsp], [onConvoy] and [onStatus],
- * which [org.avmedia.gshockapi.protocols.H5600Protocol] registers. The sequencing lives in
- * [H5600LifeLogSync]; this object performs its writes and collects the result for
- * [H5600HealthDecoder].
+ * Runs one transfer at a time, as one background job on the link. Notifications arrive through [onDrsp], [onConvoy]
+ * and [onStatus], which [org.avmedia.gshockapi.protocols.H5600Protocol] registers. The sequencing lives in
+ * [H5600LifeLogSync]; the writes it asks for go into the attempt's outbox and the job sends them, in order, from its
+ * own turn on the link. After each batch (the answer to one message of the watch) the job gives way to a more urgent
+ * job (a tap, a notification, a command) and goes on after it. The result goes to [H5600HealthDecoder].
  *
  * Every log line starts with "H5600:" so the transfer can be followed with
  * `adb logcat | grep H5600`.
@@ -42,12 +47,18 @@ object H5600HealthIO {
     private const val BULK_LOG_EVERY = 50
     private const val HEX_PREVIEW_BYTES = 16
     private const val POLL_REPLY_TIMEOUT_MS = 1_000L
+
+    /** While the outbox is empty the job looks this often whether a more urgent job waits. */
+    private const val IDLE_TURN_MS = 200L
     /** How long an attempt waits for the watch to report ready after START (observed: 6 to 50 s). */
     @Volatile internal var readyWaitMs = 60_000L
 
     /** What a read on a set-up link asks before START: the step goal and the watch condition, both used by the decoder. */
     internal val QUICK_SETUP_COMMANDS: List<Int> = listOf(STEP_GOAL_COMMAND, WATCH_CONDITION_COMMAND)
     private const val MAX_TRANSFER_ATTEMPTS = 3
+
+    /** The whole read as one job: three attempts with their setup, a workout read before START and the stream. */
+    internal const val JOB_DEADLINE_MS = 20 * 60 * 1000L
 
     private class Transfer(
         val sync: H5600LifeLogSync,
@@ -57,6 +68,9 @@ object H5600HealthIO {
         val announcements = mutableMapOf<Int, Int>()
         val setupReplies = Channel<ByteArray>(Channel.UNLIMITED)
         val convoyReplies = Channel<Unit>(Channel.UNLIMITED)
+
+        /** The writes the watch's messages ask for, sent by the job in this order; null: the attempt ended. */
+        val outbox = Channel<H5600Write?>(Channel.UNLIMITED)
         val finished = CompletableDeferred<Unit>()
         var watchCondition: ByteArray? = null
         var bulkCount = 0
@@ -66,17 +80,17 @@ object H5600HealthIO {
         @Volatile var lost = false
     }
 
-    /** Runs after every decoded read with its `0x28` answer: starts the workout download (it waits for the exchange lock). */
+    /** Runs after every decoded read with its `0x28` answer: starts the workout download (its own job, after this one). */
     @Volatile
     var afterRead: (ByteArray?) -> Unit = { H5600WorkoutIO.afterRead(it) }
 
     /**
-     * The workout read [H5600WorkoutIO.beforeLifeLog] runs before START when `0x28` flags workouts; a test seam. Always read,
-     * like a button press, without the back-off: a Health read is how workouts are read, and with one waiting the watch does
-     * not answer the LifeLog START.
+     * The workout read [H5600WorkoutIO.beforeLifeLog] runs before START when `0x28` flags workouts, inside the LifeLog job;
+     * a test seam. Always read, like a button press, without the back-off: a Health read is how workouts are read, and
+     * with one waiting the watch does not answer the LifeLog START.
      */
     @Volatile
-    var workoutsFirst: suspend () -> Unit = { H5600WorkoutIO.downloadHeld(userAsked = true) }
+    var workoutsFirst: suspend (JobScope) -> Unit = { H5600WorkoutIO.downloadHeld(userAsked = true, job = it) }
 
     private val lock = Any()
     private var active: Transfer? = null
@@ -127,7 +141,13 @@ object H5600HealthIO {
             } ?: return
         transfer.lost = true
         transfer.setupReplies.close()
+        finish(transfer)
+    }
+
+    /** The attempt ended (END, silence, a drop): the job stops sending after the writes already in the outbox. */
+    private fun finish(transfer: Transfer) {
         transfer.finished.complete(Unit)
+        transfer.outbox.trySend(null)
     }
 
     /** The protocol driver of one attempt. A peek read echoes END too: the watch drops the link without it. */
@@ -162,19 +182,23 @@ object H5600HealthIO {
         lastError = null
         workoutsTried = false
         requestStartedMs = System.currentTimeMillis()
-        var locked = false
         try {
             if (!watchSetupReady()) return StepCounterData.unavailable()
-            // No START in the middle of a time or settings exchange (the reads of the time exchange are counted one by one).
-            WatchExchange.awaitNoSettingsExchange()
-            // One exchange on the link at a time: a raw or settings read in progress finishes first.
-            WatchExchange.mutex.lock()
-            locked = true
-            return runAttempts(peek)
+            // One job on the link, after the quiet that follows a command or a transfer (no START in the middle of a time
+            // exchange); one transfer at a time.
+            return when (val out = WatchLink.transfer("LifeLog read", JOB_DEADLINE_MS, quiet = true) { runAttempts(peek, this) }.await()) {
+                is JobOutcome.Done -> out.value
+                is JobOutcome.Failed -> {
+                    lastError =
+                        if (out.reason == FailReason.DISCONNECTED) "The watch disconnected during the LifeLog read. It is read again at the next connection."
+                        else "The LifeLog read ended: ${out.detail}"
+                    org.avmedia.gshockapi.casio.ConnectionKeepAlive.log("LifeLog read ended: ${out.detail}")
+                    StepCounterData.unavailable()
+                }
+            }
         } finally {
             _status.value = null
             synchronized(lock) { requestRunning = false }
-            if (locked) WatchExchange.mutex.unlock()
         }
     }
 
@@ -207,7 +231,7 @@ object H5600HealthIO {
     }
 
     /** Up to [MAX_TRANSFER_ATTEMPTS] attempts; a dropped link ends them at once. */
-    private suspend fun runAttempts(peek: Boolean): StepCounterData {
+    private suspend fun runAttempts(peek: Boolean, job: JobScope): StepCounterData {
         for (attempt in 1..MAX_TRANSFER_ATTEMPTS) {
             _status.value =
                 if (attempt == 1) {
@@ -217,7 +241,7 @@ object H5600HealthIO {
                 }
             val outcome =
                 if (linkLostDuringRequest) AttemptOutcome(StepCounterData.unavailable(), restart = false, lost = true)
-                else runAttempt(ZoneId.systemDefault(), peek)
+                else runAttempt(ZoneId.systemDefault(), peek, job)
             if (outcome.lost || linkLostDuringRequest) {
                 lastError = "The watch disconnected during the LifeLog read. It is read again at the next connection."
                 org.avmedia.gshockapi.casio.ConnectionKeepAlive.log("LifeLog read stopped: the link dropped (attempt $attempt)")
@@ -235,13 +259,13 @@ object H5600HealthIO {
     }
 
     /** One attempt: setup, START, polls, then the data. restart = true when the watch stopped answering. */
-    private suspend fun runAttempt(zone: ZoneId, peek: Boolean): AttemptOutcome {
+    private suspend fun runAttempt(zone: ZoneId, peek: Boolean, job: JobScope): AttemptOutcome {
         val transfer = Transfer(syncFor(peek), zone)
         synchronized(lock) { active = transfer }
         try {
             Timber.i("H5600: LifeLog attempt start (peek=$peek, zone=$zone)")
             org.avmedia.gshockapi.casio.ConnectionKeepAlive.log("LifeLog read starts (peek=$peek)")
-            val stepGoal = runSetup(transfer)
+            val stepGoal = runSetup(transfer, job)
             if (transfer.lost) return AttemptOutcome(StepCounterData.unavailable(), restart = false, lost = true)
             Timber.i("H5600: setup finished, step goal=$stepGoal")
             // One workout read per Health read: a restarted LifeLog attempt does not start it again.
@@ -249,23 +273,23 @@ object H5600HealthIO {
                 org.avmedia.gshockapi.casio.ConnectionKeepAlive.log("LifeLog: the workouts were tried in this Health read, not again")
                 true
             } else {
-                H5600WorkoutIO.beforeLifeLog(transfer.watchCondition, workoutsFirst).also { workoutsTried = it }
+                H5600WorkoutIO.beforeLifeLog(transfer.watchCondition) { workoutsFirst(job) }.also { workoutsTried = it }
             }
             if (transfer.lost) return AttemptOutcome(StepCounterData.unavailable(), restart = false, lost = true)
 
             // The official app and the Python script write START before the first poll. The watch
             // acknowledges it on DRSP once it is ready. Without this write the first poll gets no reply.
-            send(H5600Write(H5600Channel.DRSP, H5600LifeLogSync.START))
+            send(job, H5600Write(H5600Channel.DRSP, H5600LifeLogSync.START))
 
             for (write in synchronized(lock) { transfer.sync.start() }) {
-                send(write)
+                send(job, write)
             }
 
             // Re-polls while the watch is silent, and gives up on this attempt after a few silent polls.
             val watchdog = scope.launch { keepPolling(transfer) }
             val completed =
                 try {
-                    withTimeoutOrNull(OVERALL_TIMEOUT_MS.milliseconds) { transfer.finished.await() } != null
+                    withTimeoutOrNull(OVERALL_TIMEOUT_MS.milliseconds) { sendFromOutbox(transfer, job) } != null
                 } finally {
                     watchdog.cancel()
                 }
@@ -312,8 +336,8 @@ object H5600HealthIO {
             setupWaiting = false
             synchronized(lock) { active = null }
             org.avmedia.gshockapi.casio.ConnectionSetup.onTransferEnded()
-            WatchExchange.onTransferEnded()
             transfer.setupReplies.close()
+            transfer.outbox.close()
             Timber.i("H5600: attempt end")
         }
     }
@@ -335,7 +359,7 @@ object H5600HealthIO {
             if (System.currentTimeMillis() - started > readyWaitMs) {
                 Timber.w("H5600: watch not ready after ${readyWaitMs / 1000} s ($notReady polls); restarting the attempt")
                 transfer.silent = true
-                transfer.finished.complete(Unit)
+                finish(transfer)
                 break
             }
             if (reply == null) {
@@ -344,8 +368,42 @@ object H5600HealthIO {
                 Timber.w("H5600: watch busy, retry #$notReady")
                 delay(POLL_REPLY_TIMEOUT_MS.milliseconds)
             }
-            send(H5600Write(H5600Channel.CONVOY, byteArrayOf(0x00, 0x00, 0x00)))
+            transfer.outbox.trySend(H5600Write(H5600Channel.CONVOY, byteArrayOf(0x00, 0x00, 0x00)))
         }
+    }
+
+    /**
+     * The job's side of the outbox, until the attempt ended: sends every write in the order asked; after each batch (all
+     * that waits, the answer to the watch's last messages) a block boundary, where a more urgent job runs first. The
+     * watch's messages that come meanwhile are taken by [onNotification] and answered when this job goes on. At the end it
+     * waits until its last write (the END echo) went out: the link is not handed on before.
+     */
+    private suspend fun sendFromOutbox(transfer: Transfer, job: JobScope) {
+        var last: kotlinx.coroutines.Deferred<org.avmedia.gshockapi.casio.Outcome>? = null
+        while (true) {
+            // While the watch is quiet (preparing, between blocks) a more urgent job does not wait for its next message.
+            val got = withTimeoutOrNull(IDLE_TURN_MS.milliseconds) { transfer.outbox.receiveCatching() }
+            if (got == null) {
+                job.yieldPoint()
+                continue
+            }
+            var write = got.getOrNull() ?: break
+            var ended = false
+            while (true) {
+                last = send(job, write)
+                val next = transfer.outbox.tryReceive()
+                if (next.isFailure) break
+                val following = next.getOrNull()
+                if (following == null) {
+                    ended = true
+                    break
+                }
+                write = following
+            }
+            if (ended) break
+            job.yieldPoint()
+        }
+        last?.await()
     }
 
     /**
@@ -356,7 +414,7 @@ object H5600HealthIO {
     internal fun setupCommands(): List<Int> = QUICK_SETUP_COMMANDS
 
     /** Sends each one-byte setup request and waits for its reply. Returns the step goal, if read. */
-    private suspend fun runSetup(transfer: Transfer): Int? {
+    private suspend fun runSetup(transfer: Transfer, job: JobScope): Int? {
         var stepGoal: Int? = null
         val commands = setupCommands()
         org.avmedia.gshockapi.casio.ConnectionKeepAlive.log("LifeLog: the link is set up (47 01), only 0x43 and 0x28 are read")
@@ -364,7 +422,7 @@ object H5600HealthIO {
             if (transfer.lost) break
             Timber.d("H5600: setup 0x${command.toString(16)} -> watch")
             setupWaiting = true
-            IO.writeCmd(GetSetMode.GET, byteArrayOf(command.toByte()))
+            job.post(GetSetMode.GET, byteArrayOf(command.toByte()))
             val reply = awaitSetupReply(transfer, command)
             setupWaiting = false
             if (reply == null) {
@@ -376,7 +434,7 @@ object H5600HealthIO {
                 stepGoal = (reply[1].toInt() and 0xFF) or ((reply[2].toInt() and 0xFF) shl 8)
             }
             if (command in H5600LifeLogSync.ECHO_REPLY_COMMANDS) {
-                IO.writeCmd(GetSetMode.SET, org.avmedia.gshockapi.casio.ConnectionSetup.writeBackValue(command, reply))
+                job.post(GetSetMode.SET, org.avmedia.gshockapi.casio.ConnectionSetup.writeBackValue(command, reply))
             }
         }
         return stepGoal
@@ -434,24 +492,25 @@ object H5600HealthIO {
                 val pending = if (transfer.sync.isPolling) next.filter { it.delayMs == 0L } else next
                 pending to transfer.sync.isFinished   // capture isFinished; complete() moves below
             }
-        scope.launch {
-            // Send all echo writes FIRST (e.g. the END echo for 04 2e), then signal
-            // completion so request() does not resume and clean up before the write goes out.
-            for (write in writes) send(write)
-            if (nowDone) transfer.finished.complete(Unit)
+        // Into the outbox, in the order of the messages: the job sends them. The echo writes first (e.g. the END echo for
+        // 04 2e), then the end, so the job sends the echo before the attempt ends.
+        synchronized(lock) {
+            for (write in writes) transfer.outbox.trySend(write)
+            if (nowDone) finish(transfer)
         }
     }
 
-    private suspend fun send(write: H5600Write) {
+    /** One write of the LifeLog job: a frame in line on the link, behind the job's earlier ones. */
+    private suspend fun send(job: JobScope, write: H5600Write): kotlinx.coroutines.Deferred<org.avmedia.gshockapi.casio.Outcome> {
         if (write.delayMs > 0) {
             Timber.d("H5600: waiting ${write.delayMs} ms (watch busy)")
             delay(write.delayMs)
         }
         Timber.i("H5600: ${write.channel} -> ${hex(write.data, HEX_PREVIEW_BYTES)}")
-        when (write.channel) {
-            H5600Channel.CONVOY -> IO.writeCmd(GetSetMode.CONVOY, write.data)
-            H5600Channel.DRSP -> IO.writeCmd(GetSetMode.DATA_REQUEST, write.data)
-            H5600Channel.STATUS -> IO.writeCmd(GetSetMode.SET, write.data)
+        return when (write.channel) {
+            H5600Channel.CONVOY -> job.post(GetSetMode.CONVOY, write.data)
+            H5600Channel.DRSP -> job.post(GetSetMode.DATA_REQUEST, write.data)
+            H5600Channel.STATUS -> job.post(GetSetMode.SET, write.data)
         }
     }
 

@@ -105,7 +105,6 @@ class LifeLogReadSpeedTest {
         H5600HealthIO.readyWaitMs = 60_000L
         WatchLink.queue = savedQueue
         ConnectionSetup.reset()
-        if (WatchExchange.mutex.isLocked) WatchExchange.mutex.unlock()
     }
 
     private fun install(watch: SlowLinkWatch) {

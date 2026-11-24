@@ -103,7 +103,7 @@ class TransferJobsTest {
         assertTrue(gatt.writes().isEmpty())
     }
 
-    /** Compatible with the LifeLog lock: a workout read that waits (settings exchange running) does not hold the link meanwhile. */
+    /** A workout read that waits (for the quiet after a settings read) does not hold the link meanwhile. */
     @Test fun aWorkoutReadThatWaitsLeavesTheLinkFree() = runBlocking {
         val savedQueue = WatchLink.queue
         val savedSink = H5600WorkoutIO.sink
@@ -121,25 +121,18 @@ class TransferJobsTest {
         }
         ConnectionSetup.reset()
         ConnectionSetup.onWatchSetupDone()
-        val exchangeRuns = CompletableDeferred<Unit>()
-        val release = CompletableDeferred<Unit>()
         try {
-            val settings = async(Dispatchers.IO) { WatchExchange.settingsExchange { exchangeRuns.complete(Unit); release.await() } }
-            exchangeRuns.await()
+            assertTrue(WatchLink.writeChecked(GetSetMode.SET, byteArrayOf(0x12)))
             val read = async(Dispatchers.IO) { H5600WorkoutIO.download(userAsked = true) }
             Thread.sleep(200)
-            assertEquals("the settings write went out while the workout read waits", true, withTimeoutOrNull(2_000) { WatchLink.writeChecked(GetSetMode.SET, byteArrayOf(0x13)) })
-            release.complete(Unit)
-            settings.await()
+            assertEquals("the settings write went out while the workout read waits", true, withTimeoutOrNull(500) { WatchLink.writeChecked(GetSetMode.SET, byteArrayOf(0x13)) })
             withTimeout(20_000) { read.await() }
         } finally {
-            release.complete(Unit)
             WatchLink.queue = savedQueue
             H5600WorkoutIO.sink = savedSink
             H5600WorkoutIO.link = savedLink
             H5600WorkoutIO.resetBackoff()
             ConnectionSetup.reset()
-            if (WatchExchange.mutex.isLocked) WatchExchange.mutex.unlock()
         }
         assertTrue(0x13 in sent)
     }

@@ -82,7 +82,6 @@ class TransferWaitsForWatchSetupTest {
         ConnectionKeepAlive.writer = ConnectionWriter
         ConnectionSetup.busy = { H5600HealthIO.isActive || H5600WorkoutIO.isActive }
         ConnectionSetup.reset()
-        if (WatchExchange.mutex.isLocked) WatchExchange.mutex.unlock()
     }
 
     private fun receive(data: String) = MessageDispatcher.onReceived(data, H5600Protocol)
@@ -102,8 +101,8 @@ class TransferWaitsForWatchSetupTest {
         val read = async(Dispatchers.IO) { H5600HealthIO.request(peek = true) }
         delay(500)
         assertTrue("no setup replay, no START before 47 01: ${link.frames}", link.frames.isEmpty())
-        assertTrue("no transfer holds the link", !WatchExchange.transferRunning())
-        assertNotNull("a settings read does not wait", withTimeoutOrNull(300) { WatchExchange.awaitNoTransfer() })
+        assertTrue("no transfer holds the link", !WatchLink.busy())
+        assertNotNull("a settings read does not wait", withTimeoutOrNull(1_000) { holdTheLink().complete(Unit) })
 
         ConnectionSetup.onWatchSetupDone()
         val first = withTimeoutOrNull(3_000) { while (link.frames.isEmpty()) delay(20); link.frames.first() }

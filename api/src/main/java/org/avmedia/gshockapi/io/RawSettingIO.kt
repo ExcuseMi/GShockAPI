@@ -43,7 +43,8 @@ internal object AndroidSettingLink : SettingLink {
  * Write: the full packet on the all-features characteristic (GetSetMode.SET, 26eb002d); [safeWriter] reads, changes
  *        only the target bytes, writes with a write result and reads back.
  *
- * One request at a time ([sendLock]), and none while a LifeLog transfer holds [WatchExchange] (it fails at once).
+ * One request at a time ([sendLock]). During a transfer the request is a command job that goes at the transfer's next
+ * boundary.
  * [request] (retried, shared by concurrent readers of the same request) and [read] (one try, plain-words failure)
  * are the same exchange; [modifySafe] serializes read-modify-write per code, so two quick changes cannot undo each other.
  */
@@ -127,8 +128,6 @@ object RawSettingIO {
         synchronized(lock) { current?.takeIf { it.key == key && it.deferred.isActive } }?.let { return await(it, timeoutMs, code) }
         org.avmedia.gshockapi.casio.ConnectionSetup.awaitIdle()
         return sendLock.withLock {
-            // A LifeLog transfer is running: it needs the link, so this read does not start.
-            if (!WatchExchange.mutex.tryLock()) throw Failure("The watch is busy with a transfer.")
             val pending = Pending(key, code, accept)
             synchronized(lock) { current = pending }
             try {
@@ -137,7 +136,6 @@ object RawSettingIO {
                 await(pending, timeoutMs, code)
             } finally {
                 synchronized(lock) { if (current === pending) current = null }
-                WatchExchange.mutex.unlock()
             }
         }
     }

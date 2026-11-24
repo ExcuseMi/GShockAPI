@@ -39,6 +39,14 @@ class LinkSourceCheckTest {
     @Test fun onlyTheLinksGattReachesTheManager() =
         only("a manager write or subscription", Regex("""\b(manager|bleManager)\??\.(writeChecked|writeAndWait|write|subscribe)\("""), setOf("Connection.kt"))
 
+    /** The LifeLog, workout and tide transfers write only from their own job (its outbox and post), never as loose commands. */
+    @Test fun theTransfersWriteOnlyFromTheirJob() {
+        val transfers = setOf("H5600HealthIO.kt", "H5600WorkoutIO.kt", "H5600WorkoutTransfer.kt", "TideTransferIO.kt", "TideTransfer.kt", "JobWorkoutLink.kt")
+        val bad = filesWith(Regex("""\bIO\.(writeCmd|writeChecked|request)\(|\bWatchLink\.write(Checked)?\(""")) intersect transfers
+        assertTrue("a transfer writes outside its job: $bad", bad.isEmpty())
+        assertEquals("the transfer files are found", transfers, sources().map { it.name }.toSet() intersect transfers)
+    }
+
     @Test fun sequencersAndJobQueuesAreMadeOnlyByALink() {
         only("a WatchQueue made", Regex("""(?<!class )\bWatchQueue\("""), setOf("WatchLink.kt"))
         only("a WatchJobQueue made", Regex("""(?<!class )\bWatchJobQueue\("""), setOf("WatchLink.kt"))

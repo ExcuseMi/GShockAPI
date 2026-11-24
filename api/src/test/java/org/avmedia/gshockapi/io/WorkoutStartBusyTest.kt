@@ -13,7 +13,12 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.withTimeoutOrNull
+import org.avmedia.gshockapi.ble.GetSetMode
 import org.avmedia.gshockapi.casio.ConnectionSetup
+import org.avmedia.gshockapi.casio.WatchChannel
+import org.avmedia.gshockapi.casio.WatchLink
+import org.avmedia.gshockapi.casio.WatchQueue
+import org.avmedia.gshockapi.casio.WatchTransport
 import org.avmedia.gshockapi.log.TestLog
 import org.junit.After
 import org.junit.Assert.assertEquals
@@ -93,7 +98,6 @@ class WorkoutStartAfterExchangeTest {
         H5600WorkoutIO.link = savedLink
         H5600WorkoutIO.resetBackoff()
         ConnectionSetup.reset()
-        if (WatchExchange.mutex.isLocked) WatchExchange.mutex.unlock()
     }
 
     /** [FakeWatch] delivered like the connection does; the first [refusals] start writes get `03 01`. */
@@ -126,18 +130,26 @@ class WorkoutStartAfterExchangeTest {
         return inner
     }
 
+    /** A time exchange is several reads in a row: no workout start in a gap between them, only after the quiet after the last. */
     @Test fun noWorkoutStartWhileASettingsExchangeRuns() = runBlocking {
         install(refusals = 0)
         H5600WorkoutIO.sink = { true }
-        val exchangeEnds = CompletableDeferred<Unit>()
-        val exchange = async(Dispatchers.IO) { WatchExchange.settingsExchange { exchangeEnds.await() } }
-        delay(100)
+        val savedQueue = WatchLink.queue
+        WatchLink.queue = WatchQueue(transport = WatchTransport { _: WatchChannel, _: ByteArray -> true })
+        val exchange = async(Dispatchers.IO) {
+            repeat(3) {
+                assertTrue(WatchLink.writeChecked(GetSetMode.SET, byteArrayOf(0x13)))
+                delay(300)
+                assertTrue("a workout start in the gap after read ${it + 1}: $writes", writes.isEmpty())
+            }
+        }
+        delay(50)
         val read = async(Dispatchers.IO) { H5600WorkoutIO.download(userAsked = true) }
-        delay(500)
-        assertTrue("nothing sent while the exchange runs: $writes", writes.isEmpty())
-        exchangeEnds.complete(Unit)
         exchange.await()
+        delay(400)
+        assertTrue("a workout start within the quiet after the exchange: $writes", writes.isEmpty())
         val result = withTimeoutOrNull(15_000) { read.await() }
+        WatchLink.queue = savedQueue
         assertNotNull(result)
         assertNull(result!!.error)
         assertEquals("001c0000000000000000", writes.first())
@@ -161,6 +173,8 @@ class WorkoutStartAfterExchangeTest {
     @Test fun aWorkoutReadRightAfterALifeLogWaitsAndIsNotRefused() = runBlocking {
         install(refusals = 0)
         H5600WorkoutIO.sink = { true }
+        // The LifeLog read as a job that just ended.
+        assertTrue(WatchLink.transfer("LifeLog read", 5_000, quiet = true) {}.await().ok)
         val ended = System.currentTimeMillis()
         val inner = H5600WorkoutIO.link!!
         H5600WorkoutIO.link = object : WorkoutLink {
@@ -175,7 +189,6 @@ class WorkoutStartAfterExchangeTest {
                 inner.bulk(data)
             }
         }
-        WatchExchange.onTransferEnded(ended)
         val result = withTimeoutOrNull(20_000) { H5600WorkoutIO.download() }
         assertNotNull(result)
         assertNull(result!!.error)

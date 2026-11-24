@@ -47,7 +47,6 @@ class SetupFirstTest {
     }
 
     @After fun restore() {
-        if (WatchExchange.mutex.isLocked) WatchExchange.mutex.unlock()
         ConnectionKeepAlive.writer = ConnectionWriter
         ConnectionSetup.busy = { H5600HealthIO.isActive || H5600WorkoutIO.isActive }
         RawSettingIO.link = AndroidSettingLink

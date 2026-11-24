@@ -1,6 +1,13 @@
 package org.avmedia.gshockapi.io
 
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.GlobalScope
+import org.avmedia.gshockapi.ble.GetSetMode
+import org.avmedia.gshockapi.casio.CasioConstants
+import org.avmedia.gshockapi.casio.WatchChannel
+import org.avmedia.gshockapi.casio.WatchLink
+import org.avmedia.gshockapi.casio.WatchQueue
+import org.avmedia.gshockapi.casio.WatchTransport
 import kotlinx.coroutines.async
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -49,7 +56,6 @@ class RawSettingIOTest {
     }
 
     @After fun release() {
-        if (WatchExchange.mutex.isLocked) WatchExchange.mutex.unlock()
         RawSettingIO.link = AndroidSettingLink
         RawSettingIO.settleMs = 1_000L
     }
@@ -101,21 +107,69 @@ class RawSettingIOTest {
         assertFalse(RawSettingIO.offer("0xFF 41"))
     }
 
-    @Test fun noReadStartsWhileATransferHoldsTheLink() = runBlocking {
-        WatchExchange.mutex.lock()
-        val reply = RawSettingIO.read(byteArrayOf(0x41), 2_000)
-        assertNull(reply.frame)
-        assertTrue(reply.failure!!, reply.failure!!.contains("busy"))
-        assertTrue("nothing may be written during a transfer", link.requests.isEmpty())
+    /** The real wire: the single link's queue with a fake watch that answers `0x11` once [answer] completed. */
+    private fun realWire(sent: MutableList<String>, answer: CompletableDeferred<Unit>) {
+        RawSettingIO.link = AndroidSettingLink
+        WatchLink.queue = WatchQueue(
+            transport = WatchTransport { _: WatchChannel, f: ByteArray ->
+                sent += "%02X".format(f[0])
+                if (f[0] == 0x11.toByte()) GlobalScope.launch {
+                    answer.await()
+                    val hex = "0x11 00 00 00 06 00 00 00 00 00"
+                    WatchLink.onNotification(CasioConstants.CASIO_ALL_FEATURES_CHARACTERISTIC_UUID, hex)
+                    RawSettingIO.offer(hex)
+                }
+                true
+            },
+            readTimeoutMs = 3_000,
+        )
+    }
+
+    /** Before the job queue a read during a transfer failed at once ("busy"); now it goes at the transfer's next boundary. */
+    @Test fun aReadDuringATransferGoesAtItsNextBoundary() = runBlocking {
+        val sent = java.util.concurrent.CopyOnWriteArrayList<String>()
+        val savedQueue = WatchLink.queue
+        realWire(sent, CompletableDeferred(Unit))
+        try {
+            val boundary = CompletableDeferred<Unit>()
+            val transfer = WatchLink.transfer("test transfer", 10_000) {
+                exchange(GetSetMode.CONVOY, byteArrayOf(0x05, 0x01))
+                boundary.await()
+                yieldPoint()
+                exchange(GetSetMode.CONVOY, byteArrayOf(0x05, 0x02))
+            }
+            while (sent.isEmpty()) delay(10)
+            val read = async { RawSettingIO.read(byteArrayOf(0x11), 3_000) }
+            delay(300)
+            assertEquals("nothing of the read while the transfer holds the link", listOf("05"), sent.toList())
+            boundary.complete(Unit)
+            val reply = read.await()
+            assertTrue(reply.failure.orEmpty(), reply.frame != null)
+            assertTrue(transfer.await().ok)
+            assertEquals(listOf("05", "11", "05"), sent.toList())
+        } finally {
+            WatchLink.queue = savedQueue
+        }
     }
 
     @Test fun aTransferWaitsForARunningRead() = runBlocking {
-        val read = async { RawSettingIO.read(byteArrayOf(0x41), 1_500) }
-        while (link.requests.isEmpty()) delay(10)
-        assertFalse("the read holds the link", WatchExchange.mutex.tryLock())
-        assertTrue(RawSettingIO.offer("0x41 01 02"))
-        read.await()
-        assertTrue(WatchExchange.mutex.tryLock())
+        val sent = java.util.concurrent.CopyOnWriteArrayList<String>()
+        val savedQueue = WatchLink.queue
+        val answer = CompletableDeferred<Unit>()
+        realWire(sent, answer)
+        try {
+            val read = async { RawSettingIO.read(byteArrayOf(0x11), 3_000) }
+            while (sent.isEmpty()) delay(10)
+            val transfer = WatchLink.transfer("test transfer", 10_000) { exchange(GetSetMode.CONVOY, byteArrayOf(0x05, 0x01)) }
+            delay(300)
+            assertEquals("the transfer waits for the answer", listOf("11"), sent.toList())
+            answer.complete(Unit)
+            assertTrue(read.await().frame != null)
+            assertTrue(transfer.await().ok)
+            assertEquals(listOf("11", "05"), sent.toList())
+        } finally {
+            WatchLink.queue = savedQueue
+        }
     }
 
     @Test fun anAnswerIsMatchedByTheCodeOnly() = runBlocking {

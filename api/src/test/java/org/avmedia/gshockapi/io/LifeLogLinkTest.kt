@@ -42,7 +42,6 @@ class LifeLogLinkTest {
 
     @After fun restore() {
         H5600HealthIO.stepCounterSupported = { org.avmedia.gshockapi.WatchInfo.hasStepCounter }
-        if (WatchExchange.mutex.isLocked) WatchExchange.mutex.unlock()
     }
 
     @Test fun aPeekReadEchoesEndLikeEveryRead() {

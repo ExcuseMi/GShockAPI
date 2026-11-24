@@ -44,21 +44,31 @@ object WatchLink {
         }
     }
 
+    /** True while a job holds the one link, for log lines. */
+    fun busy(): Boolean = link.jobs.busy()
+
     /** The manager is gone (closed by the app): what waits ends, and writes fail at once again until the next manager. */
     fun release(reason: String) = link.jobs.detach(reason)
 
     /**
-     * A long transfer (workouts, tide) as one background job on the one link: it holds the link between its boundaries
-     * and gives way at them. A drop ends it. The caller takes the exchange lock first, so it never waits for the LifeLog
-     * lock while it holds the link.
+     * A long transfer (LifeLog, workouts, tide) as one background job on the one link: it holds the link between its
+     * boundaries and gives way at them, and one transfer runs at a time. A drop ends it. [quiet]: it starts only after
+     * the settle of the jobs before it ([JobSpec.COMMAND_SETTLE_MS] after a command, [JobSpec.TRANSFER_SETTLE_MS] after a
+     * LifeLog or workout read), and its own end keeps the next quiet transfer waiting [JobSpec.TRANSFER_SETTLE_MS].
      */
-    fun <T> transfer(name: String, deadlineMs: Long, block: suspend JobScope.() -> T): Deferred<JobOutcome<T>> =
-        link.submit(JobSpec(name, TRANSFER, JobPriority.BACKGROUND, deadlineMs, OnDisconnect.CANCEL), block)
+    fun <T> transfer(name: String, deadlineMs: Long, quiet: Boolean = false, block: suspend JobScope.() -> T): Deferred<JobOutcome<T>> =
+        link.submit(
+            JobSpec(
+                name, TRANSFER, JobPriority.BACKGROUND, deadlineMs, OnDisconnect.CANCEL,
+                settleMs = if (quiet) JobSpec.TRANSFER_SETTLE_MS else 0L, startsQuiet = quiet,
+            ),
+            block,
+        )
 
     private val TRANSFER = JobSource.System("transfer")
 
     private fun job(handle: GetSetMode, data: ByteArray) =
-        link.submit(JobSpec("%s 0x%02X".format(handle.name.lowercase(), (data.firstOrNull()?.toInt() ?: 0) and 0xFF), SOURCE, JobPriority.COMMAND)) {
+        link.submit(JobSpec("%s 0x%02X".format(handle.name.lowercase(), (data.firstOrNull()?.toInt() ?: 0) and 0xFF), SOURCE, JobPriority.COMMAND, settleMs = JobSpec.COMMAND_SETTLE_MS)) {
             exchange(handle, data)
         }
 
