@@ -100,10 +100,13 @@ class WatchJobQueue internal constructor(
 
     /** The link is gone for good: every job ends. */
     internal fun close(reason: String) {
-        val ending = synchronized(lock) {
-            _state.value = LinkState.DISCONNECTED
-            live.toList().onEach { it.endReason = FailReason.LINK_CLOSED }
-        }
+        synchronized(lock) { _state.value = LinkState.DISCONNECTED }
+        endAll(reason)
+    }
+
+    /** Every job ends ([FailReason.LINK_CLOSED]); the state stays. */
+    internal fun endAll(reason: String) {
+        val ending = synchronized(lock) { live.toList().onEach { it.endReason = FailReason.LINK_CLOSED } }
         ending.forEach { it.job?.cancel() }
         frames().clear(reason)
     }
@@ -111,8 +114,9 @@ class WatchJobQueue internal constructor(
     private fun <T> start(spec: JobSpec, rank: Int, setup: Boolean, block: suspend JobScope.() -> T): Deferred<JobOutcome<T>> {
         val t = Ticket(spec, rank, seq.incrementAndGet(), setup)
         val result = CompletableDeferred<JobOutcome<T>>()
+        var outcome: JobOutcome<T>? = null
         val job = scope.launch(start = CoroutineStart.LAZY) {
-            val outcome: JobOutcome<T> =
+            outcome =
                 try {
                     withTimeout(spec.deadlineMs) {
                         t.granted.await()
@@ -129,7 +133,6 @@ class WatchJobQueue internal constructor(
                 } catch (e: Throwable) {
                     JobOutcome.Failed(FailReason.ERROR, e.message ?: e.javaClass.simpleName)
                 }
-            result.complete(outcome)
         }
         t.job = job
         job.invokeOnCompletion {
@@ -140,7 +143,8 @@ class WatchJobQueue internal constructor(
                     dispatchLocked()
                 }
             }
-            if (!result.isCompleted) result.complete(JobOutcome.Failed(t.endReason ?: FailReason.CANCELLED, endText(t)))
+            // Completed after the clean-up above: a caller that sees the result also sees the job gone from [pending].
+            result.complete(outcome ?: JobOutcome.Failed(t.endReason ?: FailReason.CANCELLED, endText(t)))
         }
         result.invokeOnCompletion { if (it != null) job.cancel() }
         // In the line before the job's coroutine runs: the order of asking is the order of running.

@@ -24,10 +24,14 @@ object WatchLink {
     val link: org.avmedia.gshockapi.link.WatchLink =
         org.avmedia.gshockapi.link.WatchLink("single", NoGatt, CoroutineScope(SupervisorJob() + Dispatchers.IO), LinkState.READY)
 
-    /** The frame sequencer of the one link; tests put their own in. */
+    /**
+     * The frame sequencer of the one link; tests put their own in. The jobs of the old one end with it (a job stuck on a
+     * transport that never answers would otherwise hold the link for its whole deadline).
+     */
     var queue: WatchQueue
         get() = link.frames
         set(value) {
+            link.jobs.endAll("The frame sequencer was replaced.")
             link.frames = value
         }
 

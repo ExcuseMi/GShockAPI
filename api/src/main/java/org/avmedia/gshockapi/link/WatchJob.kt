@@ -30,7 +30,7 @@ data class JobSpec(
     val onDisconnect: OnDisconnect = OnDisconnect.WAIT,
 ) {
     companion object {
-        /** How long a command waits for a watch that is away before it fails (owner 2026-11-24: 3 min). */
+        /** How long a command waits for a watch that is away before it fails (3 min). */
         const val COMMAND_DEADLINE_MS = 3 * 60 * 1000L
     }
 }

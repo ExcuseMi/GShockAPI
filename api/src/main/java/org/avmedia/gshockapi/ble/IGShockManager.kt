@@ -148,7 +148,7 @@ private class GShockManagerImpl(
 
         // Every characteristic that notifies gets its callback now (no GATT operation). The descriptor writes are made by
         // the link's setup job, one after the other: made here they overlapped each other and the first request
-        // ("prior command is not finished", 2026-11-24 17:12 and 19:51).
+        // (Android refused them with "prior command is not finished").
         notifiableChars.clear()
         gatt.services.forEach { service ->
             service.characteristics.forEach { char ->

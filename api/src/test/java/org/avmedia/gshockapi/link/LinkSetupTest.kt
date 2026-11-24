@@ -13,7 +13,7 @@ import org.junit.Rule
 import org.junit.Test
 import org.junit.rules.Timeout
 
-/** The setup after a (re)connect is one job: nothing overlaps it (2026-11-24 19:51: 0x22 "prior command is not finished"). */
+/** The setup after a (re)connect is one job: nothing overlaps it (a 0x22 read during the descriptor writes was refused: "prior command is not finished"). */
 class LinkSetupTest {
     init { TestLog.install() }
 
@@ -22,7 +22,7 @@ class LinkSetupTest {
     private val links = testLinks()
 
     @Test fun aReadAskedTheMomentTheLinkIsUpGoesOnTheAirOnlyAfterEverySubscription() = runBlocking {
-        // As at 19:51: the app's init asked 0x22 right after DeviceReady, while the descriptor writes were still running.
+        // The app's init asks 0x22 right after DeviceReady, while the descriptor writes were still running.
         val gatt = FakeGatt(subscribeMs = 20)
         val link = links.open("A", gatt)
         gatt.onWrite = { f ->
