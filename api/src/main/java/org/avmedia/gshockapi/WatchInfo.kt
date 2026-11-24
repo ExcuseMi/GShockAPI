@@ -758,10 +758,10 @@ data object WatchInfo {
     /**
      * The same with [serviceFound] null while the link's characteristics are not known (a drop and reconnect of an
      * always-connected DW-H5600): the model decides, and the text waits for the link in the write. "Not discovered yet"
-     * must never read as "this watch cannot show them" (2026-11-24: a GBX-H5600 was told it had none during a reconnect).
+     * must never read as "this watch cannot show them".
      */
     @RequiresApi(Build.VERSION_CODES.O)
-    fun showsAppNotificationsNow(serviceFound: Boolean?): Boolean = (serviceFound == true) && hasAppNotifications // RED CHECK: unknown read as no
+    fun showsAppNotificationsNow(serviceFound: Boolean?): Boolean = (serviceFound ?: true) && hasAppNotifications
 
     /** Look up whether a watch model is always-connected by device name. */
     @RequiresApi(Build.VERSION_CODES.O)

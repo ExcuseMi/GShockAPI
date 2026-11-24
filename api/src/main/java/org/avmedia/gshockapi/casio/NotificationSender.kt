@@ -87,7 +87,7 @@ object NotificationSender {
 
     /**
      * Queues [buffer] (already inverted). The result comes when the text is sent, dropped or held back too long; each
-     * outcome is one line in the watch log (a text that never reached the watch was silent before, 2026-11-24).
+     * outcome is one line in the watch log (a text that never reached the watch was silent before).
      */
     fun send(buffer: ByteArray): Deferred<Outcome> =
         scope.async {
@@ -102,7 +102,7 @@ object NotificationSender {
                     Outcome.EMPTY -> "notification text dropped: empty"
                 },
             )
-            Outcome.SENT // RED CHECK: every text reported sent, as before
+            outcome
         }
 
     /** False when the watch did not allow a text within [holdLimitMs]: the text is dropped. */

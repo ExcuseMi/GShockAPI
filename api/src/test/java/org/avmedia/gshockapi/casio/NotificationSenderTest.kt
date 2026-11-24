@@ -82,7 +82,7 @@ class NotificationSenderTest {
         assertTrue(NotificationGate.allowed())
     }
 
-    // 2026-11-24: a plugin's text was reported "done" before anything was written; the caller now gets how it ended.
+    // A plugin's text was reported "done" before anything was written; the caller now gets how it ended.
     @Test fun aSentTextSaysSent() = runBlocking {
         assertEquals(NotificationSender.Outcome.SENT, NotificationSender.send(ByteArray(30)).await())
     }

@@ -100,7 +100,7 @@ class OcwFirstConnectionTest {
         assertFalse(WatchInfo.showsAppNotifications(serviceFound = false))
     }
 
-    // 2026-11-24 19:01:42: a GBX-H5600 reconnecting (link back, services not discovered yet) was told it cannot show them.
+    // A GBX-H5600 reconnecting (link back, services not discovered yet) was told it cannot show them.
     @Test fun whileTheServicesAreNotKnownTheModelDecides() {
         WatchInfo.setModelForTest("CASIO GBX-H5600")
         assertTrue(WatchInfo.showsAppNotificationsNow(serviceFound = null))
