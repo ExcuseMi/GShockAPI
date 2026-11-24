@@ -28,10 +28,23 @@ data class JobSpec(
     val priority: JobPriority,
     val deadlineMs: Long = COMMAND_DEADLINE_MS,
     val onDisconnect: OnDisconnect = OnDisconnect.WAIT,
+    /** After this job ended the link stays quiet this long for a job that [startsQuiet]. */
+    val settleMs: Long = 0L,
+    /**
+     * The job's first turn waits until every ended job's [settleMs] passed (other jobs run meanwhile). A transfer start:
+     * the watch refused one (`03 01`, `00 01 04` busy) that came right after another exchange or transfer.
+     */
+    val startsQuiet: Boolean = false,
 ) {
     companion object {
         /** How long a command waits for a watch that is away before it fails (3 min). */
         const val COMMAND_DEADLINE_MS = 3 * 60 * 1000L
+
+        /** The quiet after a command before a transfer starts (a time exchange is several reads in a row). */
+        const val COMMAND_SETTLE_MS = 1_000L
+
+        /** The quiet after a LifeLog or workout transfer before the next one starts (the watch refused a start 5 ms later). */
+        const val TRANSFER_SETTLE_MS = 3_000L
     }
 }
 

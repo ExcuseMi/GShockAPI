@@ -9,6 +9,7 @@ import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Deferred
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.TimeoutCancellationException
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
@@ -55,12 +56,19 @@ class WatchJobQueue internal constructor(
     /** Per priority and source: the round its next job gets. */
     private val nextRound = HashMap<Pair<Int, JobSource>, Long>()
     private var setupGeneration = 0L
+
+    /** Until when a job that starts quiet waits ([JobSpec.settleMs] of the jobs that ended). */
+    private var quietUntil = 0L
+    private var quietTimerAt = 0L
     private val _state = MutableStateFlow(initial)
 
     val state: StateFlow<LinkState> = _state
 
     /** The jobs not ended yet (waiting or running), for status lines and tests. */
     fun pending(): Int = synchronized(lock) { live.size }
+
+    /** True while a job holds the link, for status lines. */
+    fun busy(): Boolean = synchronized(lock) { holder != null }
 
     /** Asks for a job. The result always completes: done, or failed with a reason. */
     fun <T> submit(spec: JobSpec, block: suspend JobScope.() -> T): Deferred<JobOutcome<T>> =
@@ -205,9 +213,17 @@ class WatchJobQueue internal constructor(
         LinkState.DISCONNECTED -> false
     }
 
+    /** A job's first turn waits for the quiet after the jobs that ended; a job that already ran resumes at once. */
+    private fun quiet(t: Ticket, now: Long): Boolean = t.started || !t.spec.startsQuiet || now >= quietUntil
+
     private fun dispatchLocked() {
         if (holder != null) return
-        val next = waiting.firstOrNull { eligible(it) } ?: return
+        val now = System.currentTimeMillis()
+        val next = waiting.firstOrNull { eligible(it) && quiet(it, now) }
+        if (next == null) {
+            if (waiting.any { eligible(it) }) wakeAtQuietLocked()
+            return
+        }
         waiting.remove(next)
         holder = next
         next.started = true
@@ -215,7 +231,23 @@ class WatchJobQueue internal constructor(
         next.granted.complete(Unit)
     }
 
+    /** One timer for the end of the quiet: then the waiting job that starts quiet gets its turn. */
+    private fun wakeAtQuietLocked() {
+        if (quietTimerAt == quietUntil) return
+        quietTimerAt = quietUntil
+        val left = quietUntil - System.currentTimeMillis()
+        scope.launch {
+            delay(left)
+            synchronized(lock) {
+                quietTimerAt = 0L
+                dispatchLocked()
+            }
+        }
+    }
+
+    /** [t] ended: its settle starts now. */
     private fun release(t: Ticket) = synchronized(lock) {
+        if (t.started && t.spec.settleMs > 0) quietUntil = maxOf(quietUntil, System.currentTimeMillis() + t.spec.settleMs)
         if (holder === t) {
             holder = null
             dispatchLocked()

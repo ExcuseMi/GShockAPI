@@ -199,4 +199,37 @@ class WatchJobQueueTest {
         assertTrue("the setup ran before block 12 was read again: $ops", ops.lastIndexOf("sub 2") < ops.lastIndexOf("w B0 0C"))
         assertEquals(1, gatt.maxInFlight.get())
     }
+
+    /** The quiet before a transfer start: the watch refused a start right after a command or a transfer (`03 01`). */
+    @Test fun aQuietJobWaitsForTheSettleOfTheJobBeforeItAndOtherJobsRunMeanwhile() = runBlocking {
+        val gatt = FakeGatt()
+        val link = readyLink(links, "A", gatt)
+        link.submit(spec("command", JobPriority.COMMAND).copy(settleMs = 400)) { exchange(GetSetMode.CONVOY, bytes(0x31)) }.await()
+        val ended = System.currentTimeMillis()
+        val quiet = link.submit(spec("transfer", JobPriority.BACKGROUND).copy(startsQuiet = true)) { System.currentTimeMillis() }
+        val other = link.submit(spec("other", JobPriority.BACKGROUND)) { exchange(GetSetMode.CONVOY, bytes(0x41)); System.currentTimeMillis() }
+        val otherAt = (other.await() as JobOutcome.Done).value
+        val quietAt = (quiet.await() as JobOutcome.Done).value
+        assertTrue("the other job ran in the quiet", otherAt < quietAt)
+        assertTrue("the transfer started ${quietAt - ended} ms after the command", quietAt - ended >= 390)
+    }
+
+    /** Only the first turn waits: a transfer that gave way to a tap goes on at once after it. */
+    @Test fun aQuietJobThatGaveWayGoesOnWithoutWaitingAgain() = runBlocking {
+        val gatt = FakeGatt()
+        val link = readyLink(links, "A", gatt)
+        val tap = AtomicReference<Deferred<JobOutcome<Outcome>>?>(null)
+        val started = System.currentTimeMillis()
+        val out = link.submit(spec("transfer", JobPriority.BACKGROUND).copy(startsQuiet = true, settleMs = 2_000)) {
+            for (i in 0 until 10) {
+                exchange(GetSetMode.DATA_REQUEST, bytes(0xB0, i))
+                if (i == 3) tap.set(link.submit(spec("tap", JobPriority.USER).copy(settleMs = 2_000)) { exchange(GetSetMode.SET, bytes(0x11)) })
+                yieldPoint()
+            }
+        }.await()
+        assertTrue(out.ok)
+        assertTrue(tap.get()!!.await().ok)
+        assertTrue("the transfer waited after the tap", System.currentTimeMillis() - started < 1_500)
+        assertEquals("the tap right after block 3", gatt.writes().indexOf("w B0 03") + 1, gatt.writes().indexOf("w 11"))
+    }
 }
