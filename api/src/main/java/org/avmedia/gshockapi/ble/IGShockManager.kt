@@ -306,7 +306,6 @@ private class GShockManagerImpl(
                 }
             }
             connectionState = ConnectionState.DISCONNECTED
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) H5600ConnectionIO.onDisconnected()
 
             readCharacteristicHolder = null
             writeCharacteristicHolder = null

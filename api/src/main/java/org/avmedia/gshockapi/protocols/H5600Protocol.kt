@@ -7,8 +7,6 @@ import org.avmedia.gshockapi.casio.ConnectionKeepAlive
 import org.avmedia.gshockapi.casio.ConnectionSetup
 import org.avmedia.gshockapi.casio.NotificationGate
 import org.avmedia.gshockapi.io.H5600Channel
-import org.avmedia.gshockapi.io.H5600ConnectionIO
-import org.avmedia.gshockapi.io.H5600ConnectionSetup
 import org.avmedia.gshockapi.io.H5600HealthIO
 import org.avmedia.gshockapi.io.H5600WorkoutIO
 import org.avmedia.gshockapi.io.TideTransferIO
@@ -44,9 +42,6 @@ object H5600Protocol : StandardProtocol() {
         // Anything else on status (such as the button info reply) goes through the normal routing.
         return if (channel == H5600Channel.STATUS && !H5600HealthIO.isAwaitingSetupReply()) first else channel.key
     }
-
-    /** Every connection (automatic reconnects of kind 13 and 14 included) runs the watch's setup. */
-    override suspend fun onInitialized() = H5600ConnectionIO.start(ButtonPressedIO.getConnectionKind())
 
     override suspend fun getStepCount(peek: Boolean): StepCounterData = H5600HealthIO.request(peek)
 

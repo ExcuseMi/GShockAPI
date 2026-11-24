@@ -352,7 +352,7 @@ object H5600HealthIO {
             if (transfer.lost) break
             Timber.d("H5600: setup 0x${command.toString(16)} -> watch")
             setupWaiting = true
-            writeCmd(GetSetMode.GET, byteArrayOf(command.toByte()))
+            IO.writeCmd(GetSetMode.GET, byteArrayOf(command.toByte()))
             val reply = awaitSetupReply(transfer, command)
             setupWaiting = false
             if (reply == null) {
@@ -437,9 +437,9 @@ object H5600HealthIO {
         }
         Timber.i("H5600: ${write.channel} -> ${hex(write.data, HEX_PREVIEW_BYTES)}")
         when (write.channel) {
-            H5600Channel.CONVOY -> writeCmd(GetSetMode.CONVOY, write.data)
-            H5600Channel.DRSP -> writeCmd(GetSetMode.DATA_REQUEST, write.data)
-            H5600Channel.STATUS -> writeCmd(GetSetMode.SET, write.data)
+            H5600Channel.CONVOY -> IO.writeCmd(GetSetMode.CONVOY, write.data)
+            H5600Channel.DRSP -> IO.writeCmd(GetSetMode.DATA_REQUEST, write.data)
+            H5600Channel.STATUS -> IO.writeCmd(GetSetMode.SET, write.data)
         }
     }
 
