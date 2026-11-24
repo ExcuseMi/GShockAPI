@@ -162,7 +162,7 @@ class WorkoutStartAfterExchangeTest {
         install(refusals = 0)
         H5600WorkoutIO.sink = { true }
         val ended = System.currentTimeMillis()
-        val inner = H5600WorkoutIO.link
+        val inner = H5600WorkoutIO.link!!
         H5600WorkoutIO.link = object : WorkoutLink {
             override fun drsp(data: ByteArray) = inner.drsp(data)
 

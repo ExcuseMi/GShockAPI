@@ -3,7 +3,8 @@ package org.avmedia.gshockapi.io
 import android.os.Build
 import androidx.annotation.RequiresApi
 import kotlinx.coroutines.channels.Channel
-import org.avmedia.gshockapi.ble.GetSetMode
+import org.avmedia.gshockapi.casio.WatchLink
+import org.avmedia.gshockapi.link.JobOutcome
 import org.avmedia.gshockapi.casio.ConnectionKeepAlive
 
 /**
@@ -34,18 +35,20 @@ object TideTransferIO {
         val channel = Channel<WorkoutMsg>(Channel.UNLIMITED)
         try {
             inbox = channel
-            return TideTransfer(link, channel).run(record).error
+            // Its own job on the link, taken after the exchange lock: it gives way to more urgent jobs between pieces.
+            return when (val out = WatchLink.transfer("tide transfer", JOB_DEADLINE_MS) { TideTransfer(link ?: JobWorkoutLink(this), channel).run(record).error }.await()) {
+                is JobOutcome.Done -> out.value
+                is JobOutcome.Failed -> "The tide transfer ended: ${out.detail}"
+            }
         } finally {
             inbox = null
             WatchExchange.mutex.unlock()
         }
     }
 
-    private val link = object : WorkoutLink {
-        override fun drsp(data: ByteArray) = IO.writeCmd(GetSetMode.DATA_REQUEST, data)
+    /** A test seam: a scripted watch in place of the link. */
+    @Volatile internal var link: WorkoutLink? = null
 
-        override fun bulk(data: ByteArray) = IO.writeCmd(GetSetMode.CONVOY, data)
-
-        override suspend fun bulkConfirmed(data: ByteArray): Boolean = IO.writeChecked(GetSetMode.CONVOY, data)
-    }
+    /** Start, pieces with their gaps, end: well under this. */
+    internal const val JOB_DEADLINE_MS = 3 * 60 * 1000L
 }

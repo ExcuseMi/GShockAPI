@@ -18,6 +18,9 @@ interface WorkoutLink {
         bulk(data)
         return true
     }
+
+    /** A point where the transfer may pause for a more urgent job on the link (a closed block chain, a stored workout). */
+    suspend fun boundary() {}
 }
 
 class WorkoutMsg(val channel: H5600Channel, val data: ByteArray)
@@ -78,6 +81,7 @@ class WorkoutTransfer(
                 if (index < sorted.lastIndex) delay(AFTER_MARK_MS)
                 blockCache.keys.removeAll { it.startsWith("${hdr.startUtcMillis}:") }
                 done++
+                link.boundary()
             }
             finish(abort = false)
             return WorkoutRunResult(done, null)
@@ -214,8 +218,10 @@ class WorkoutTransfer(
 
     private suspend fun fetchWorkout(slot: Int, h: WorkoutHeader): WorkoutSession {
         val data = chain(h, CAT_DATA, h.dataAddress, h.dataBytes) ?: throw Fail("workout in slot $slot: data blocks could not be read")
+        link.boundary()
         log("Workout read: slot $slot 1F ${data.size} data blocks")
         val laps = chain(h, CAT_LAPS, h.lapAddress, h.lapBytes) ?: throw Fail("workout in slot $slot: lap blocks could not be read")
+        link.boundary()
         // The one-minute walking laps (header offset 55) are read to keep the chain complete; they are not decoded yet.
         val minute = chain(h, CAT_LAPS, h.minuteLapAddress, h.minuteLapBytes) ?: throw Fail("workout in slot $slot: minute lap blocks could not be read")
         log("Workout read: slot $slot 20 ${laps.size} lap blocks, ${minute.size} minute lap blocks")

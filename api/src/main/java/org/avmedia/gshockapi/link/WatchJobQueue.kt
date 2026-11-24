@@ -239,6 +239,13 @@ class WatchJobQueue internal constructor(
             return frames().enqueue(handle, data).await()
         }
 
+        override fun post(handle: GetSetMode, data: ByteArray): Deferred<Outcome> {
+            if (!synchronized(lock) { holder === t }) {
+                return CompletableDeferred(Outcome.failed("${t.spec.name}: not sent, the job does not hold the link"))
+            }
+            return frames().enqueue(handle, data)
+        }
+
         override suspend fun yieldPoint() {
             val give = synchronized(lock) { !eligible(t) || waiting.any { it.rank < t.rank && eligible(it) } }
             if (give) reacquire(t)

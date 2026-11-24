@@ -5,7 +5,10 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import org.avmedia.gshockapi.ble.GetSetMode
+import kotlinx.coroutines.Deferred
 import org.avmedia.gshockapi.link.JobOutcome
+import org.avmedia.gshockapi.link.JobScope
+import org.avmedia.gshockapi.link.OnDisconnect
 import org.avmedia.gshockapi.link.JobPriority
 import org.avmedia.gshockapi.link.JobSource
 import org.avmedia.gshockapi.link.JobSpec
@@ -43,6 +46,16 @@ object WatchLink {
 
     /** The manager is gone (closed by the app): what waits ends, and writes fail at once again until the next manager. */
     fun release(reason: String) = link.jobs.detach(reason)
+
+    /**
+     * A long transfer (workouts, tide) as one background job on the one link: it holds the link between its boundaries
+     * and gives way at them. A drop ends it. The caller takes the exchange lock first, so it never waits for the LifeLog
+     * lock while it holds the link.
+     */
+    fun <T> transfer(name: String, deadlineMs: Long, block: suspend JobScope.() -> T): Deferred<JobOutcome<T>> =
+        link.submit(JobSpec(name, TRANSFER, JobPriority.BACKGROUND, deadlineMs, OnDisconnect.CANCEL), block)
+
+    private val TRANSFER = JobSource.System("transfer")
 
     private fun job(handle: GetSetMode, data: ByteArray) =
         link.submit(JobSpec("%s 0x%02X".format(handle.name.lowercase(), (data.firstOrNull()?.toInt() ?: 0) and 0xFF), SOURCE, JobPriority.COMMAND)) {

@@ -69,6 +69,13 @@ interface JobScope {
     suspend fun exchange(handle: GetSetMode, data: ByteArray): Outcome
 
     /**
+     * Like [exchange] without waiting: the frame goes in line now, behind this job's earlier frames. Only while this job
+     * holds the link (from its own code, not while it gave the link up at a [yieldPoint]); else nothing is sent and the
+     * result is a failure.
+     */
+    fun post(handle: GetSetMode, data: ByteArray): kotlinx.coroutines.Deferred<Outcome>
+
+    /**
      * A block boundary of a long job: when a job of higher priority waits it runs now, then this job goes on where it was.
      * Only the write already on the air finishes first.
      */

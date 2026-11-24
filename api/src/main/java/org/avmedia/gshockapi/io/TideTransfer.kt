@@ -70,6 +70,7 @@ class TideTransfer(
             // The next piece goes chunkGapMs after the write result of this one; a failed write ends the transfer.
             if (!link.bulkConfirmed(piece)) return fail("A piece of the tide data could not be sent to the watch.")
             delay(chunkGapMs)
+            link.boundary()
         }
         ConnectionKeepAlive.log("tide: all pieces sent, waiting up to ${endTimeoutMs / 1000} s for the end message")
         val end = awaitChannel(endTimeoutMs, H5600Channel.DRSP) { true }
