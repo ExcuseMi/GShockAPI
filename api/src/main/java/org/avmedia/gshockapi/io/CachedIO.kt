@@ -1,3 +1,4 @@
+import org.avmedia.gshockapi.io.LinkCache
 import org.avmedia.gshockapi.utils.Utils
 import java.util.Locale
 
@@ -31,58 +32,30 @@ object CachedIOFunctional {
             }
 }
 
+/** The single-watch cache: the [LinkCache] of the one link. New code uses `link.cache`. */
 object CachedIO {
-    private data class State(
-        val cache: Map<String, Any?> = emptyMap(),
-        val cacheOff: Boolean = false,
-    )
+    private val cache: LinkCache get() = org.avmedia.gshockapi.casio.WatchLink.cache
 
-    private var state = State()
+    fun clearCache() = cache.clear()
 
-    fun clearCache() {
-        state = state.copy(cache = emptyMap())
-    }
+    fun remove(key: String) = cache.remove(key)
 
-    fun remove(key: String) {
-        state = state.copy(cache = state.cache - key.uppercase())
-    }
-
-    @Suppress("UNCHECKED_CAST")
     suspend fun <T : Any> request(
         key: String,
         compute: suspend (String) -> T,
-    ): T =
-        when {
-            state.cacheOff ->
-                compute(key).also { value ->
-                    state = state.copy(cache = state.cache + (key.uppercase() to value))
-                }
-
-            else ->
-                state.cache[key.uppercase()]?.let { it as T } ?: compute(key).also { value ->
-                    state = state.copy(cache = state.cache + (key.uppercase() to value))
-                }
-        }
+    ): T = cache.request(key, compute)
 
     fun set(
         key: String,
         func: () -> Unit,
-    ) {
-        func()
-        remove(key)
-    }
+    ) = cache.set(key, func)
 
     fun put(
         key: String,
         value: Any,
-    ) {
-        state = state.copy(cache = state.cache + (key.uppercase() to value))
-    }
+    ) = cache.put(key, value)
 
-    @Suppress("UNCHECKED_CAST")
-    fun <T : Any> get(key: String): T =
-        state.cache[key.uppercase()]?.let { it as T }
-            ?: throw IllegalStateException("Key $key not found in cache")
+    fun <T : Any> get(key: String): T = cache.get(key)
 
     fun createKey(data: String): String = CachedIOFunctional.createKey(data)
 }

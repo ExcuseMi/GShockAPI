@@ -39,6 +39,29 @@ class ConnectionContext internal constructor(linkWriter: WatchWriter) {
     val keepAlive: ConnectionKeepAlive = ConnectionKeepAlive(linkWriter) { setup.onWatchSetupDone() }
 
     val setup: ConnectionSetup = ConnectionSetup(keepAlive)
+
+    /** The watch's frames this link's upkeep and setup take: a protocol routes them here, never to another link's. */
+    val routes: ConnectionRoutes = ConnectionRoutes(this)
+}
+
+/** The handlers of one link's upkeep and setup, by frame code. Made only by its [ConnectionContext]. */
+class ConnectionRoutes internal constructor(context: ConnectionContext) {
+    /** Codes the link's upkeep and setup handle alone: the check `49`, the setup notice `47`, `3A`, `3B` and the time manager `39`. */
+    val own: Map<Int, (String) -> Unit> = mapOf(
+        ConnectionKeepAlive.CHECK to context.keepAlive::onCheck,
+        ConnectionKeepAlive.SETUP to context.keepAlive::onSetup,
+        0x3A to context.setup::on3a,
+        0x3B to context.setup::on3b,
+        CasioConstants.CHARACTERISTICS.CASIO_CURRENT_TIME_MANAGER.code to context.setup::on39,
+    )
+
+    /** Answers the library handles itself that the setup watches as well, after the library's handler: `28`, `23`, `10`, `11`. */
+    val watched: Map<Int, (String) -> Unit> = mapOf(
+        CasioConstants.CHARACTERISTICS.CASIO_WATCH_CONDITION.code to context.setup::on28,
+        CasioConstants.CHARACTERISTICS.CASIO_WATCH_NAME.code to context.setup::on23,
+        CasioConstants.CHARACTERISTICS.CASIO_BLE_FEATURES.code to context.setup::onKind,
+        CasioConstants.CHARACTERISTICS.CASIO_SETTING_FOR_BLE.code to context.setup::onBle,
+    )
 }
 
 /**

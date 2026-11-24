@@ -1,6 +1,5 @@
 package org.avmedia.gshockapi.io
 
-import CachedIO
 import android.os.Build
 import androidx.annotation.RequiresApi
 import kotlinx.coroutines.CompletableDeferred
@@ -77,123 +76,32 @@ object ButtonPressedIOFunctional {
             ?.get(8)
 }
 
-// ============================================================================
-// Imperative Shell: Side Effects & State Management
-// ============================================================================
-
 /**
- * Button Press IO handler with state management.
- *
- * Detects which watch button was pressed and provides access to the last button state.
- * Uses pure functional core for all button code parsing.
+ * The single-watch button info: the [LinkButtonInfo] of the one link. New code uses `link.button`.
  */
 @RequiresApi(Build.VERSION_CODES.O)
 object ButtonPressedIO {
-    private data class State(
-        val lastKnownButton: IO.WatchButton = IO.WatchButton.INVALID,
-        val connectionKind: Int? = null,
-        val deferredResult: CompletableDeferred<IO.WatchButton>? = null,
-    )
-
-    private var state = State()
-
-    /** The last valid 0x10 answer and when it came. The connection setup and init read the same answer: one read, both use it. */
-    private data class Answer(val button: IO.WatchButton, val at: Long)
-
-    @Volatile private var answer: Answer? = null
-
-    @Volatile var clock: () -> Long = System::currentTimeMillis
+    private val button: LinkButtonInfo get() = org.avmedia.gshockapi.casio.WatchLink.button
 
     /** An answer this old is not shared any more: init asks again. */
-    const val SHARE_WINDOW_MS = 30_000L
+    const val SHARE_WINDOW_MS = LinkButtonInfo.SHARE_WINDOW_MS
 
-    fun forgetAnswer() {
-        answer = null
-    }
+    var clock: () -> Long
+        get() = button.clock
+        set(value) { button.clock = value }
 
-    private fun freshAnswer(): IO.WatchButton? = answer?.takeIf { clock() - it.at in 0..SHARE_WINDOW_MS }?.button
+    fun forgetAnswer() = button.forgetAnswer()
 
-    suspend fun request(): IO.WatchButton {
-        Timber.i("Button info request started (0x10)")
-        // Always ask the watch: a value cached for an earlier watch must not answer for this one.
-        CachedIO.remove("10")
-        return CachedIO.request("10") { key ->
-            val shared = freshAnswer()
-            if (shared != null) {
-                // The kind of connection came with that same answer and stays as it was read.
-                Timber.i("Button info already received on this link: $shared")
-                shared
-            } else {
-                resetConnectionKind()
-                val deferred = CompletableDeferred<IO.WatchButton>()
-                synchronized(this) {
-                    if (state.deferredResult != null) {
-                        Timber.w("BTN_TEST replacing a pending button request; the earlier one can no longer be answered")
-                    }
-                    state = state.copy(deferredResult = deferred)
-                    Timber.i("BTN_TEST request pending=true")
-                }
-                try {
-                    Timber.i("Sending button info request (0x$key)")
-                    IO.request(key)
-                    deferred.await()
-                } finally {
-                    synchronized(this) {
-                        if (state.deferredResult === deferred) {
-                            state = state.copy(deferredResult = null)
-                        }
-                    }
-                }
-            }
-        }.also { button ->
-            state = state.copy(lastKnownButton = button)
-            Timber.i("Button info request completed: $button")
-        }
-    }
+    suspend fun request(): IO.WatchButton = button.request()
 
-    fun get(): IO.WatchButton = state.lastKnownButton
+    fun get(): IO.WatchButton = button.get()
 
-    /**
-     * The raw kind of connection reported by the watch for the current connection,
-     * or null if it has not been read yet.
-     */
-    fun getConnectionKind(): Int? = state.connectionKind
+    /** The raw kind of connection reported by the watch for the current connection, or null if it has not been read yet. */
+    fun getConnectionKind(): Int? = button.getConnectionKind()
 
-    fun resetConnectionKind() {
-        synchronized(this) {
-            state = state.copy(connectionKind = null)
-        }
-    }
+    fun resetConnectionKind() = button.resetConnectionKind()
 
-    fun put(value: Any) {
-        CachedIO.put("10", value)
-    }
+    fun put(value: Any) = button.put(value)
 
-    fun onReceived(data: String) {
-        Timber.i("Button info response received: $data")
-        synchronized(this) {
-            state = state.copy(connectionKind = ButtonPressedIOFunctional.parseConnectionKind(data))
-        }
-        // Use pure function to parse button press
-        ButtonPressedIOFunctional.parseButtonPress(data)
-            .fold(
-                onSuccess = { button ->
-                    answer = Answer(button, clock())
-                    synchronized(this) {
-                        if (state.deferredResult == null) {
-                            Timber.w("BTN_TEST reply dropped: no request was pending")
-                        }
-                        state.deferredResult?.complete(button)
-                        state = state.copy(deferredResult = null)
-                    }
-                },
-                onFailure = { error ->
-                    Timber.e("Failed to parse button press: ${error.message}")
-                    synchronized(this) {
-                        state.deferredResult?.complete(IO.WatchButton.INVALID)
-                        state = state.copy(deferredResult = null)
-                    }
-                },
-            )
-    }
+    fun onReceived(data: String) = button.onReceived(data)
 }

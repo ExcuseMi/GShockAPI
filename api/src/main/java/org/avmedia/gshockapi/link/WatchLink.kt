@@ -7,6 +7,7 @@ import kotlinx.coroutines.Deferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.StateFlow
+import org.avmedia.gshockapi.LinkWatchInfo
 import org.avmedia.gshockapi.ble.GetSetMode
 import org.avmedia.gshockapi.casio.ConnectionContext
 import org.avmedia.gshockapi.casio.LinkNotifications
@@ -15,6 +16,9 @@ import org.avmedia.gshockapi.casio.Outcome
 import org.avmedia.gshockapi.casio.WatchChannel
 import org.avmedia.gshockapi.casio.WatchQueue
 import org.avmedia.gshockapi.casio.WatchTransport
+import org.avmedia.gshockapi.io.LinkButtonInfo
+import org.avmedia.gshockapi.io.LinkCache
+import org.avmedia.gshockapi.io.LinkRawSettings
 import org.avmedia.gshockapi.io.LinkTransfers
 
 /** The GATT of one watch: writes, and the notification subscriptions the setup makes. A fake in the tests. */
@@ -48,6 +52,18 @@ class WatchLink internal constructor(
     /** This link's connection upkeep (`49`, `47`) and setup (`0x10` .. `0x39`): its writes are command jobs on this link. */
     val connection: ConnectionContext = ConnectionContext(LinkWriter(this))
 
+    /** What this link's watch is (name, model, address, the model's features). */
+    val watchInfo: LinkWatchInfo = LinkWatchInfo()
+
+    /** The answers this link's watch gave, by key. */
+    val cache: LinkCache = LinkCache()
+
+    /** This link's button info (`0x10`): its own request, answer and kind of connection. */
+    val button: LinkButtonInfo = LinkButtonInfo(this, cache)
+
+    /** This link's settings reads and writes (the raw table): its own request in flight and its own locks. */
+    val rawSettings: LinkRawSettings = LinkRawSettings(this)
+
     /** This link's LifeLog and workout transfers: what runs, waits or failed on them is this watch's alone. */
     val transfers: LinkTransfers = LinkTransfers(this)
 
@@ -57,6 +73,8 @@ class WatchLink internal constructor(
     init {
         connection.setup.busy = { transfers.busy }
         connection.setup.afterSetup = { transfers.workouts.onSetupDone(it) }
+        // A new setup asks for the button info again: an answer of the last connection is not this one's.
+        connection.setup.onReset = { button.forgetAnswer() }
     }
 
     /** One request or write as a command job (fire and forget unless the result is awaited). */

@@ -18,8 +18,9 @@ data object WatchInfo {
     // Immutable State
     // =========================================================================
 
+    /** What one watch is: kept per link ([LinkWatchInfo]); this object reads the one link's. */
     @RequiresApi(Build.VERSION_CODES.O)
-    private data class State(
+    internal data class State(
         val name: String = "",
         val shortName: String = "",
         val address: String = "",
@@ -27,15 +28,11 @@ data object WatchInfo {
         val info: ModelInfo = ModelInfo(model = WatchModel.GENERIC),
     )
 
-    private var state: Any = "" // placeholder for late init
+    /** The one link's watch (the single-watch API). New code reads `link.watchInfo`. */
+    private val one: LinkWatchInfo get() = org.avmedia.gshockapi.casio.WatchLink.watchInfo
 
     @RequiresApi(Build.VERSION_CODES.O)
-    private fun getState(): State {
-        if (state !is State) {
-            state = State()
-        }
-        return state as State
-    }
+    private fun getState(): State = one.state
 
     // =========================================================================
     // Public read-only accessors
@@ -732,9 +729,7 @@ data object WatchInfo {
 
     /** Sets the watch [name] resolves to without the DeviceName event (which needs the main thread); for tests. */
     @RequiresApi(Build.VERSION_CODES.O)
-    internal fun setModelForTest(name: String) {
-        state = buildState(name)
-    }
+    internal fun setModelForTest(name: String) = one.setModelForTest(name)
 
     /** The model attributes a device name resolves to; for tests. */
     @RequiresApi(Build.VERSION_CODES.O)
@@ -773,7 +768,7 @@ data object WatchInfo {
 
     /** Pure: build a complete new State from a device name. */
     @RequiresApi(Build.VERSION_CODES.O)
-    private fun buildState(name: String): State {
+    internal fun buildState(name: String): State {
         val shortName = deriveShortName(name)
         val model = resolveModel(name)
         val info = resolveModelInfo(model)
@@ -786,24 +781,18 @@ data object WatchInfo {
 
     @RequiresApi(Build.VERSION_CODES.O)
     fun setNameAndModel(name: String) {
-        state = buildState(name)
-        ProgressEvents.onNext("DeviceName", (state as State).name)
+        one.setNameAndModel(name)
+        ProgressEvents.onNext("DeviceName", one.name)
     }
 
     @RequiresApi(Build.VERSION_CODES.O)
     fun setAddress(address: String) {
-        if (state !is State) {
-            state = State(address = address)
-        } else {
-            state = (state as State).copy(address = address)
-        }
+        one.setAddress(address)
         ProgressEvents.onNext("DeviceAddress", address)
     }
 
     @RequiresApi(Build.VERSION_CODES.O)
-    fun getAddress(): String = if (state is State) (state as State).address else ""
+    fun getAddress(): String = one.address
 
-    fun reset() {
-        state = ""
-    }
+    fun reset() = one.reset()
 }

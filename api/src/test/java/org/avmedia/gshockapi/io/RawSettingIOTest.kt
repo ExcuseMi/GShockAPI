@@ -56,7 +56,7 @@ class RawSettingIOTest {
     }
 
     @After fun release() {
-        RawSettingIO.link = AndroidSettingLink
+        RawSettingIO.link = RawSettingIO.linkWire
         RawSettingIO.settleMs = 1_000L
     }
 
@@ -109,7 +109,7 @@ class RawSettingIOTest {
 
     /** The real wire: the single link's queue with a fake watch that answers `0x11` once [answer] completed. */
     private fun realWire(sent: MutableList<String>, answer: CompletableDeferred<Unit>) {
-        RawSettingIO.link = AndroidSettingLink
+        RawSettingIO.link = RawSettingIO.linkWire
         WatchLink.queue = WatchQueue(
             transport = WatchTransport { _: WatchChannel, f: ByteArray ->
                 sent += "%02X".format(f[0])

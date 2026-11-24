@@ -106,15 +106,14 @@ class LinkSourceCheckTest {
             "the single-watch connection context",
             Regex("""\bWatchLink\.connection\b"""),
             setOf(
-                "GShockAPI.kt", "IGShockManager.kt", "H5600Protocol.kt", "NotificationSubscriptions.kt",
-                "RawSettingIO.kt",
+                "GShockAPI.kt", "IGShockManager.kt", "NotificationSubscriptions.kt",
             ),
         )
 
     /** The per-link transfer and notification code reaches nothing of the single-watch adapter: only its own link. */
     @Test fun thePerLinkTransfersAndTextsReachOnlyTheirLink() {
         val perLink = setOf("H5600LifeLogReader.kt", "H5600WorkoutReader.kt", "LinkTransfers.kt", "LinkNotifications.kt")
-        val single = Regex("""\bcasio\.WatchLink\b|import org\.avmedia\.gshockapi\.casio\.WatchLink\b|(?<![\w.])WatchLink\.(?!kt)\w+|\b(H5600HealthIO|H5600WorkoutIO|NotificationGate)\.|\bNotificationSender\.(?!Outcome\b)""")
+        val single = Regex("""\bcasio\.WatchLink\b|import org\.avmedia\.gshockapi\.casio\.WatchLink\b|(?<![\w.])WatchLink\.(?!kt)\w+|\b(H5600HealthIO|H5600WorkoutIO|NotificationGate|WatchInfo|CachedIO|ButtonPressedIO|RawSettingIO)\.|\bNotificationSender\.(?!Outcome\b)""")
         val found = sources().filter { it.name in perLink }
         assertEquals("the per-link files are found", perLink, found.map { it.name }.toSet())
         val bad = found.filter { single.containsMatchIn(it.readText()) }.map { "${it.name}: ${single.find(it.readText())!!.value}" }
@@ -135,6 +134,37 @@ class LinkSourceCheckTest {
             "the single-watch transfers or texts",
             Regex("""\bWatchLink\.(transfers|notifications)\b"""),
             setOf("H5600HealthIO.kt", "H5600WorkoutIO.kt", "NotificationSender.kt"),
+        )
+
+    /**
+     * The per-link watch info, cache, button info and settings reads reach nothing of the single-watch adapters (only the
+     * stateless model tables of [org.avmedia.gshockapi.WatchInfo]), hold no object or companion var, and are made only by
+     * their link.
+     */
+    @Test fun thePerLinkWatchStateReachesOnlyItsLink() {
+        val perLink = setOf("LinkWatchInfo.kt", "LinkCache.kt", "LinkButtonInfo.kt", "LinkRawSettings.kt")
+        val single = Regex("""\bcasio\.WatchLink\b|import org\.avmedia\.gshockapi\.casio\.WatchLink\b|(?<![\w.])WatchLink\.(?!kt)\w+|\b(CachedIO|ButtonPressedIO|RawSettingIO|NotificationGate)\.|\bIO\.(?!(WatchButton|DstState)\b)\w+|\bWatchInfo\.(?!(State|ModelInfo|WatchModel|buildState)\b)\w+""")
+        val found = sources().filter { it.name in perLink }
+        assertEquals("the per-link files are found", perLink, found.map { it.name }.toSet())
+        val bad = found.filter { single.containsMatchIn(it.readText()) }.map { "${it.name}: ${single.find(it.readText())!!.value}" }
+        assertTrue("the single-watch adapter reached from per-link code: $bad", bad.isEmpty())
+        found.forEach { f ->
+            Regex("""^\s*(?:internal |private )?object (\w+)""", RegexOption.MULTILINE).find(f.readText())?.let { fail("${f.name}: object ${it.groupValues[1]}") }
+            f.readText().split("companion object {").drop(1).forEach { body ->
+                assertFalse("${f.name}: a var in a companion", Regex("""\bvar\b""").containsMatchIn(body.substring(0, closing(body))))
+            }
+        }
+        only("per-link watch state made", Regex("""(?<!class )\b(LinkWatchInfo|LinkCache|LinkButtonInfo|LinkRawSettings)\("""), setOf("WatchLink.kt"))
+        only("a link's setting wire made", Regex("""(?<!class )\bLinkSettingWire\("""), setOf("LinkRawSettings.kt"))
+        only("a link's connection routes made", Regex("""(?<!class )\bConnectionRoutes\("""), setOf("ConnectionKeepAlive.kt"))
+    }
+
+    /** The single-watch route to the one link's watch state: only its deprecated adapters (step 5 removes them). */
+    @Test fun theSingleWatchStateIsUsedOnlyByItsAdapters() =
+        only(
+            "the single-watch watch info, cache, button info, settings reads or routes",
+            Regex("""\bWatchLink\.(watchInfo|cache|button|rawSettings|connectionRoutes)\b"""),
+            setOf("WatchInfo.kt", "CachedIO.kt", "ButtonPressedIO.kt", "RawSettingIO.kt", "H5600Protocol.kt"),
         )
 
     private fun closing(body: String): Int {

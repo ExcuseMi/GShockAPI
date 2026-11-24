@@ -42,18 +42,28 @@ object WatchLink {
     /** The notification texts of the one link, for their single-watch adapters ([NotificationGate], [NotificationSender]). */
     val notifications: LinkNotifications get() = link.notifications
 
-    /** The one link's setup hands its end to the single-watch time and button code. A link from the registry has none of this. */
+    /** What the one link's watch is, for the single-watch [org.avmedia.gshockapi.WatchInfo]. */
+    val watchInfo: org.avmedia.gshockapi.LinkWatchInfo get() = link.watchInfo
+
+    /** The one link's cache, button info and settings reads, for their single-watch adapters ([CachedIO], [org.avmedia.gshockapi.io.ButtonPressedIO], [org.avmedia.gshockapi.io.RawSettingIO]). */
+    val cache: org.avmedia.gshockapi.io.LinkCache get() = link.cache
+    val button: org.avmedia.gshockapi.io.LinkButtonInfo get() = link.button
+    val rawSettings: org.avmedia.gshockapi.io.LinkRawSettings get() = link.rawSettings
+
+    /** The frames the one link's upkeep and setup take, for the single-watch protocol's routing ([org.avmedia.gshockapi.protocols.H5600Protocol]). */
+    val connectionRoutes: ConnectionRoutes get() = link.connection.routes
+
+    /** The one link's setup hands its end to the single-watch time code. A link from the registry has none of this. */
     private fun singleWatchHooks(link: org.avmedia.gshockapi.link.WatchLink) {
         val setup = link.connection.setup
         // The one link's watch is the connected one (a registry link is its key).
-        link.transfers.workouts.watch = { org.avmedia.gshockapi.WatchInfo.getAddress() }
+        link.transfers.workouts.watch = { link.watchInfo.address }
         setup.timeWriter = {
             CoroutineScope(Dispatchers.IO).launch {
                 runCatching { org.avmedia.gshockapi.io.TimeIO.set() }
                     .onFailure { ConnectionKeepAlive.log("time write failed: ${it.message}") }
             }
         }
-        setup.onReset = { org.avmedia.gshockapi.io.ButtonPressedIO.forgetAnswer() }
     }
 
     /**

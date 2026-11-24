@@ -12,7 +12,6 @@ import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeoutOrNull
-import org.avmedia.gshockapi.WatchInfo
 import org.avmedia.gshockapi.ble.GetSetMode
 import org.avmedia.gshockapi.link.WatchLink
 import org.avmedia.gshockapi.link.FailReason
@@ -131,9 +130,9 @@ class H5600LifeLogReader internal constructor(private val link: WatchLink, priva
     /** When the running request started, for the read time in the app log. */
     @Volatile private var requestStartedMs = 0L
 
-    /** Whether the connected watch has the LifeLog; a test seam. */
+    /** Whether this link's watch has the LifeLog (its own model, not the single-watch one); a test seam. */
     @Volatile
-    internal var stepCounterSupported: () -> Boolean = { WatchInfo.hasStepCounter }
+    internal var stepCounterSupported: () -> Boolean = { link.watchInfo.info.hasStepCounter }
 
     /**
      * The link dropped: a running read ends now. Before, it ran on into the next link, sent its setup there and took the
@@ -178,7 +177,7 @@ class H5600LifeLogReader internal constructor(private val link: WatchLink, priva
      */
     suspend fun request(peek: Boolean = true): StepCounterData {
         if (!stepCounterSupported()) {
-            Timber.i("H5600: step counter not supported on model ${WatchInfo.model}")
+            Timber.i("H5600: step counter not supported on model ${link.watchInfo.model}")
             return StepCounterData.unavailable()
         }
         if (!claimRequest()) {

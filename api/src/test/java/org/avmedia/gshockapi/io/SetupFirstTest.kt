@@ -48,7 +48,7 @@ class SetupFirstTest {
     @After fun restore() {
         singleKeepAlive.writer = singleKeepAlive.linkWriter
         singleSetup.busy = { H5600HealthIO.isActive || H5600WorkoutIO.isActive }
-        RawSettingIO.link = AndroidSettingLink
+        RawSettingIO.link = RawSettingIO.linkWire
         RawSettingIO.settleMs = 1_000L
     }
 
