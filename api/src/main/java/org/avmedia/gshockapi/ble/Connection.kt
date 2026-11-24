@@ -9,6 +9,7 @@ import android.bluetooth.BluetoothDevice
 import android.bluetooth.BluetoothManager
 import android.bluetooth.BluetoothProfile
 import android.content.Context
+import java.util.UUID
 import androidx.appcompat.app.AppCompatActivity
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -18,24 +19,30 @@ import org.avmedia.gshockapi.ProgressEvents
 import org.avmedia.gshockapi.WatchInfo
 import org.avmedia.gshockapi.casio.MessageDispatcher
 import org.avmedia.gshockapi.casio.WatchLink
-import org.avmedia.gshockapi.casio.WatchTransport
+import org.avmedia.gshockapi.casio.WatchChannel
+import org.avmedia.gshockapi.link.LinkGatt
 import org.avmedia.gshockapi.io.ButtonPressedIO
 import timber.log.Timber
 
 object Connection {
-    /** The queue's way to the radio: the write result of the current manager, false when there is none. */
-    private val ManagerTransport = WatchTransport { channel, frame ->
-        val manager = bleManager
-        if (manager == null) {
-            ProgressEvents.onNext("ApiError", "Connection manager is not initialized")
-            false
-        } else {
-            manager.writeChecked(channel.handle, frame)
+    /** The link's way to the radio: the current manager's writes and subscriptions, a failure when there is none. */
+    private val ManagerGatt = object : LinkGatt {
+        override suspend fun write(channel: WatchChannel, frame: ByteArray): Boolean {
+            val manager = bleManager
+            if (manager == null) {
+                ProgressEvents.onNext("ApiError", "Connection manager is not initialized")
+                return false
+            }
+            return manager.writeChecked(channel.handle, frame)
         }
+
+        override fun notifiable(): List<UUID> = bleManager?.notifiable().orEmpty()
+
+        override suspend fun subscribe(characteristic: UUID): Boolean = bleManager?.subscribe(characteristic) == true
     }
 
     init {
-        WatchLink.setTransport(ManagerTransport)
+        WatchLink.setTransport(ManagerGatt)
     }
 
     @Volatile
@@ -74,7 +81,7 @@ object Connection {
                 bleManager.also { bleManager = null }
             }
         if (manager != null) Timber.i("Releasing BLE manager; next connection will create a fresh manager")
-        WatchLink.queue.clear("The link to the watch was closed.")
+        WatchLink.release("The link to the watch was closed.")
         manager?.release()
     }
 

@@ -82,6 +82,12 @@ interface GShock {
 
     /** True once this link's characteristics are discovered; false while the link is away (between a drop and the next discovery). */
     fun servicesKnown(): Boolean = true
+
+    /** The characteristics of this connection that notify or indicate, in discovery order. */
+    fun notifiable(): List<UUID> = emptyList()
+
+    /** Turns notifications on for one characteristic; true when the descriptor write result came. Called by the link's setup job only. */
+    suspend fun subscribe(characteristic: UUID): Boolean = false
 }
 
 class IGShockManager(
@@ -140,14 +146,16 @@ private class GShockManagerImpl(
         // A new link: notifications must be enabled again (the descriptors are per connection).
         org.avmedia.gshockapi.casio.NotificationSubscriptions.beginDiscovery()
 
-        // Subscribe to notifications on every characteristic that supports them.
-        // Mirrors the Python subscribe-all approach — no per-model whitelists needed.
+        // Every characteristic that notifies gets its callback now (no GATT operation). The descriptor writes are made by
+        // the link's setup job, one after the other: made here they overlapped each other and the first request
+        // ("prior command is not finished", 2026-11-24 17:12 and 19:51).
+        notifiableChars.clear()
         gatt.services.forEach { service ->
             service.characteristics.forEach { char ->
                 val hasNotify = char.properties and BluetoothGattCharacteristic.PROPERTY_NOTIFY != 0
                 val hasIndicate = char.properties and BluetoothGattCharacteristic.PROPERTY_INDICATE != 0
-                if ((hasNotify || hasIndicate) && org.avmedia.gshockapi.casio.NotificationSubscriptions.claim(char.uuid)) {
-
+                if (hasNotify || hasIndicate) {
+                    notifiableChars[char.uuid] = char
                     setNotificationCallback(char).with { _, data ->
                         val hexData =
                             data.value?.joinToString(separator = " ", prefix = "0x") {
@@ -158,17 +166,31 @@ private class GShockManagerImpl(
                         org.avmedia.gshockapi.casio.WatchLink.onNotification(char.uuid, hexData)
                         org.avmedia.gshockapi.casio.WatchLink.withSource(char.uuid) { dataReceivedCallback?.dataReceived(hexData) }
                     }
-                    enableNotifications(char)
-                        .fail { _, status ->
-                            Timber.d("Failed to enable notifications for ${char.uuid}: $status")
-                        }
-                        .done {
-                            Timber.d("Subscribed to notifications: ${char.uuid}")
-                        }
-                        .enqueue()
                 }
             }
         }
+    }
+
+    private val notifiableChars = java.util.concurrent.ConcurrentHashMap<UUID, BluetoothGattCharacteristic>()
+
+    override fun notifiable(): List<UUID> = notifiableChars.keys.toList()
+
+    override suspend fun subscribe(characteristic: UUID): Boolean {
+        val char = notifiableChars[characteristic] ?: return false
+        if (!org.avmedia.gshockapi.casio.NotificationSubscriptions.claim(characteristic)) return true
+        val done = CompletableDeferred<Boolean>()
+        enableNotifications(char)
+            .fail { _, status ->
+                Timber.d("Failed to enable notifications for $characteristic: $status")
+                done.complete(false)
+            }
+            .done {
+                Timber.d("Subscribed to notifications: $characteristic")
+                done.complete(true)
+            }
+            .invalid { done.complete(false) }
+            .enqueue()
+        return withTimeoutOrNull(CommandTable.REQUEST_TIMEOUT_MS) { done.await() } ?: false
     }
 
     @SuppressLint("MissingPermission")
@@ -212,6 +234,7 @@ private class GShockManagerImpl(
         writeCharacteristicHolderSPData = null
         writeCharacteristicHolderConvoy = null
         characteristicUUIDs.clear()
+        notifiableChars.clear()
         org.avmedia.gshockapi.casio.NotificationSubscriptions.clear()
 
         if (isReady) {
@@ -271,6 +294,8 @@ private class GShockManagerImpl(
 
             val name = device.name ?: "CASIO"
             onConnected(name, device.address)
+            // The setup job (subscriptions) runs before any request that was asked meanwhile.
+            org.avmedia.gshockapi.casio.WatchLink.link.onGattReady()
 
             connectionState = ConnectionState.CONNECTED
             ProgressEvents.onNext("DeviceName", name)
@@ -290,6 +315,8 @@ private class GShockManagerImpl(
             reason: Int,
         ) {
             ProgressEvents.onNext("Disconnect", device)
+            // Jobs asked from now on wait for the link and its setup (up to their deadline).
+            org.avmedia.gshockapi.casio.WatchLink.link.onGattLost()
             org.avmedia.gshockapi.casio.ConnectionSetup.onLinkLost()
             // A LifeLog read in progress ends with the link (it must not run its setup on the next one).
             org.avmedia.gshockapi.io.H5600HealthIO.onLinkLost()
@@ -317,6 +344,7 @@ private class GShockManagerImpl(
             writeCharacteristicHolderSPData = null
             writeCharacteristicHolderConvoy = null
             characteristicUUIDs.clear()
+            notifiableChars.clear()
 
             System.gc()
         }
