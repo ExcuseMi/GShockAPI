@@ -9,11 +9,13 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.StateFlow
 import org.avmedia.gshockapi.ble.GetSetMode
 import org.avmedia.gshockapi.casio.ConnectionContext
+import org.avmedia.gshockapi.casio.LinkNotifications
 import org.avmedia.gshockapi.casio.LinkWriter
 import org.avmedia.gshockapi.casio.Outcome
 import org.avmedia.gshockapi.casio.WatchChannel
 import org.avmedia.gshockapi.casio.WatchQueue
 import org.avmedia.gshockapi.casio.WatchTransport
+import org.avmedia.gshockapi.io.LinkTransfers
 
 /** The GATT of one watch: writes, and the notification subscriptions the setup makes. A fake in the tests. */
 interface LinkGatt : WatchTransport {
@@ -46,6 +48,17 @@ class WatchLink internal constructor(
     /** This link's connection upkeep (`49`, `47`) and setup (`0x10` .. `0x39`): its writes are command jobs on this link. */
     val connection: ConnectionContext = ConnectionContext(LinkWriter(this))
 
+    /** This link's LifeLog and workout transfers: what runs, waits or failed on them is this watch's alone. */
+    val transfers: LinkTransfers = LinkTransfers(this)
+
+    /** This link's notification texts: its watch's gate (`3D`, the MTU) and one text at a time, held while a transfer runs. */
+    val notifications: LinkNotifications = LinkNotifications(this) { transfers.busy }
+
+    init {
+        connection.setup.busy = { transfers.busy }
+        connection.setup.afterSetup = { transfers.workouts.onSetupDone(it) }
+    }
+
     /** One request or write as a command job (fire and forget unless the result is awaited). */
     fun command(handle: GetSetMode, data: ByteArray): Deferred<JobOutcome<Outcome>> =
         submit(JobSpec("%s 0x%02X".format(handle.name.lowercase(), (data.firstOrNull()?.toInt() ?: 0) and 0xFF), COMMANDS, JobPriority.COMMAND, settleMs = JobSpec.COMMAND_SETTLE_MS)) {
@@ -60,6 +73,21 @@ class WatchLink internal constructor(
         private set
 
     fun <T> submit(spec: JobSpec, block: suspend JobScope.() -> T): Deferred<JobOutcome<T>> = jobs.submit(spec, block)
+
+    /**
+     * A long transfer (LifeLog, workouts, tide) as one background job on this link: it holds the link between its
+     * boundaries and gives way at them, and one transfer runs at a time. A drop ends it. [quiet]: it starts only after
+     * the settle of the jobs before it ([JobSpec.COMMAND_SETTLE_MS] after a command, [JobSpec.TRANSFER_SETTLE_MS] after a
+     * LifeLog or workout read), and its own end keeps the next quiet transfer waiting [JobSpec.TRANSFER_SETTLE_MS].
+     */
+    fun <T> transfer(name: String, deadlineMs: Long, quiet: Boolean = false, block: suspend JobScope.() -> T): Deferred<JobOutcome<T>> =
+        submit(
+            JobSpec(
+                name, TRANSFERS, JobPriority.BACKGROUND, deadlineMs, OnDisconnect.CANCEL,
+                settleMs = if (quiet) JobSpec.TRANSFER_SETTLE_MS else 0L, startsQuiet = quiet,
+            ),
+            block,
+        )
 
     /**
      * The GATT is up and its services are known. The setup runs as one job before every other: each subscription after
@@ -77,6 +105,8 @@ class WatchLink internal constructor(
     fun onGattLost() {
         jobs.linkDown("The link to the watch was closed.")
         connection.setup.onLinkLost()
+        // A LifeLog read in progress ends with the link (it must not run its setup on the next one).
+        transfers.lifeLog.onLinkLost()
     }
 
     /** A notification of this link's watch: a read that waits may take it as its answer. */
@@ -87,6 +117,9 @@ class WatchLink internal constructor(
 
 /** The source of the link's own commands (the setup, the keep-alive and the single-watch API): one source, first asked first run. */
 private val COMMANDS = JobSource.System("single-watch API")
+
+/** The source of the link's long transfers (LifeLog, workouts, tide). */
+private val TRANSFERS = JobSource.System("transfer")
 
 /**
  * The links of every watch the phone talks to, by key (the stable watch id; the address until that exists). No current

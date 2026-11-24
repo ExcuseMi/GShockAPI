@@ -316,9 +316,8 @@ private class GShockManagerImpl(
         ) {
             ProgressEvents.onNext("Disconnect", device)
             // Jobs asked from now on wait for the link and its setup (up to their deadline); the connection setup starts over.
+            // A LifeLog read in progress ends with it (it must not run its setup on the next one).
             org.avmedia.gshockapi.casio.WatchLink.link.onGattLost()
-            // A LifeLog read in progress ends with the link (it must not run its setup on the next one).
-            org.avmedia.gshockapi.io.H5600HealthIO.onLinkLost()
 
             Timber.d("Device disconnected with reason: $reason")
             when (reason) {

@@ -4,6 +4,7 @@ import java.io.File
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
+import org.junit.Assert.fail
 import org.junit.Test
 
 /**
@@ -42,7 +43,7 @@ class LinkSourceCheckTest {
 
     /** The LifeLog, workout and tide transfers write only from their own job (its outbox and post), never as loose commands. */
     @Test fun theTransfersWriteOnlyFromTheirJob() {
-        val transfers = setOf("H5600HealthIO.kt", "H5600WorkoutIO.kt", "H5600WorkoutTransfer.kt", "TideTransferIO.kt", "TideTransfer.kt", "JobWorkoutLink.kt")
+        val transfers = setOf("H5600HealthIO.kt", "H5600WorkoutIO.kt", "H5600LifeLogReader.kt", "H5600WorkoutReader.kt", "H5600WorkoutTransfer.kt", "TideTransferIO.kt", "TideTransfer.kt", "JobWorkoutLink.kt")
         val bad = filesWith(Regex("""\bIO\.(writeCmd|writeChecked|request)\(|\bWatchLink\.write(Checked)?\(""")) intersect transfers
         assertTrue("a transfer writes outside its job: $bad", bad.isEmpty())
         assertEquals("the transfer files are found", transfers, sources().map { it.name }.toSet() intersect transfers)
@@ -106,8 +107,34 @@ class LinkSourceCheckTest {
             Regex("""\bWatchLink\.connection\b"""),
             setOf(
                 "GShockAPI.kt", "IGShockManager.kt", "H5600Protocol.kt", "NotificationSubscriptions.kt",
-                "RawSettingIO.kt", "H5600WorkoutIO.kt", "H5600HealthIO.kt",
+                "RawSettingIO.kt",
             ),
+        )
+
+    /** The per-link transfer and notification code reaches nothing of the single-watch adapter: only its own link. */
+    @Test fun thePerLinkTransfersAndTextsReachOnlyTheirLink() {
+        val perLink = setOf("H5600LifeLogReader.kt", "H5600WorkoutReader.kt", "LinkTransfers.kt", "LinkNotifications.kt")
+        val single = Regex("""\bcasio\.WatchLink\b|import org\.avmedia\.gshockapi\.casio\.WatchLink\b|(?<![\w.])WatchLink\.(?!kt)\w+|\b(H5600HealthIO|H5600WorkoutIO|NotificationGate)\.|\bNotificationSender\.(?!Outcome\b)""")
+        val found = sources().filter { it.name in perLink }
+        assertEquals("the per-link files are found", perLink, found.map { it.name }.toSet())
+        val bad = found.filter { single.containsMatchIn(it.readText()) }.map { "${it.name}: ${single.find(it.readText())!!.value}" }
+        assertTrue("the single-watch adapter reached from per-link code: $bad", bad.isEmpty())
+        found.forEach { f ->
+            Regex("""^\s*(?:internal |private )?object (\w+)""", RegexOption.MULTILINE).find(f.readText())?.let { fail("${f.name}: object ${it.groupValues[1]}") }
+            f.readText().split("companion object {").drop(1).forEach { body ->
+                assertFalse("${f.name}: a var in a companion", Regex("""\bvar\b""").containsMatchIn(body.substring(0, closing(body))))
+            }
+        }
+        only("per-link transfers or texts made", Regex("""(?<!class )\b(LinkTransfers|LinkNotifications)\("""), setOf("WatchLink.kt"))
+        only("a per-link reader or sender made", Regex("""(?<!class )\b(H5600LifeLogReader|H5600WorkoutReader|LinkNotificationSender|LinkNotificationGate)\("""), setOf("LinkTransfers.kt", "LinkNotifications.kt"))
+    }
+
+    /** The single-watch route to the one link's transfers and texts: only their deprecated adapters (step 5 removes them). */
+    @Test fun theSingleWatchTransfersAndTextsAreUsedOnlyByTheirAdapters() =
+        only(
+            "the single-watch transfers or texts",
+            Regex("""\bWatchLink\.(transfers|notifications)\b"""),
+            setOf("H5600HealthIO.kt", "H5600WorkoutIO.kt", "NotificationSender.kt"),
         )
 
     private fun closing(body: String): Int {

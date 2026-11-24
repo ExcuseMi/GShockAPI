@@ -27,7 +27,7 @@ class PrivateReferencesTest {
         "docs/ADDING_A_WATCH.md" to "fields, and then writes the current time, in the order the official app uses.",
         "docs/TECHNICAL-OVERVIEW.md" to "account, no official app in the loop. It owns everything below the level",
         "api/src/main/java/org/avmedia/gshockapi/io/AppInfoIO.kt" to "* The value is a hard-coded magic number (0x93), matching the official app behavior.",
-        "api/src/main/java/org/avmedia/gshockapi/io/H5600HealthIO.kt" to "// The official app and the Python script write START before the first poll. The watch",
+        "api/src/main/java/org/avmedia/gshockapi/io/H5600LifeLogReader.kt" to "// The official app and the Python script write START before the first poll. The watch",
         "api/src/main/java/org/avmedia/gshockapi/io/H5600LifeLogSync.kt" to "// busy: the official app waits about 3.5 s before polling again",
         "api/src/main/java/org/avmedia/gshockapi/io/H5600LifeLogSync.kt" to "/** Setup requests, in the order the official app sends them. Each one is answered on STATUS. */",
         "api/src/main/java/org/avmedia/gshockapi/io/H5600LifeLogSync.kt" to "/** Replies the official app writes back unchanged to STATUS. */",

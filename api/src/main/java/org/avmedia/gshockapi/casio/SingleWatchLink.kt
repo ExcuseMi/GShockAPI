@@ -27,7 +27,7 @@ object WatchLink {
     /** Ready from the start: until the connection code reports the link's state, the manager waits for the watch itself. */
     val link: org.avmedia.gshockapi.link.WatchLink =
         org.avmedia.gshockapi.link.WatchLink("single", NoGatt, CoroutineScope(SupervisorJob() + Dispatchers.IO), LinkState.READY).also {
-            singleWatchHooks(it.connection.setup)
+            singleWatchHooks(it)
         }
 
     /**
@@ -36,10 +36,17 @@ object WatchLink {
      */
     val connection: ConnectionContext get() = link.connection
 
-    /** The one link's setup hands its end to the single-watch transfer and time code. A link from the registry has none of this. */
-    private fun singleWatchHooks(setup: ConnectionSetup) {
-        setup.afterSetup = { org.avmedia.gshockapi.io.H5600WorkoutIO.onSetupDone(it) }
-        setup.busy = { org.avmedia.gshockapi.io.H5600HealthIO.isActive || org.avmedia.gshockapi.io.H5600WorkoutIO.isActive }
+    /** The LifeLog and workout transfers of the one link, for their single-watch adapters ([org.avmedia.gshockapi.io.H5600HealthIO], [org.avmedia.gshockapi.io.H5600WorkoutIO]). */
+    val transfers: org.avmedia.gshockapi.io.LinkTransfers get() = link.transfers
+
+    /** The notification texts of the one link, for their single-watch adapters ([NotificationGate], [NotificationSender]). */
+    val notifications: LinkNotifications get() = link.notifications
+
+    /** The one link's setup hands its end to the single-watch time and button code. A link from the registry has none of this. */
+    private fun singleWatchHooks(link: org.avmedia.gshockapi.link.WatchLink) {
+        val setup = link.connection.setup
+        // The one link's watch is the connected one (a registry link is its key).
+        link.transfers.workouts.watch = { org.avmedia.gshockapi.WatchInfo.getAddress() }
         setup.timeWriter = {
             CoroutineScope(Dispatchers.IO).launch {
                 runCatching { org.avmedia.gshockapi.io.TimeIO.set() }
@@ -79,15 +86,7 @@ object WatchLink {
      * LifeLog or workout read), and its own end keeps the next quiet transfer waiting [JobSpec.TRANSFER_SETTLE_MS].
      */
     fun <T> transfer(name: String, deadlineMs: Long, quiet: Boolean = false, block: suspend JobScope.() -> T): Deferred<JobOutcome<T>> =
-        link.submit(
-            JobSpec(
-                name, TRANSFER, JobPriority.BACKGROUND, deadlineMs, OnDisconnect.CANCEL,
-                settleMs = if (quiet) JobSpec.TRANSFER_SETTLE_MS else 0L, startsQuiet = quiet,
-            ),
-            block,
-        )
-
-    private val TRANSFER = JobSource.System("transfer")
+        link.transfer(name, deadlineMs, quiet, block)
 
     private fun job(handle: GetSetMode, data: ByteArray) = link.command(handle, data)
 
