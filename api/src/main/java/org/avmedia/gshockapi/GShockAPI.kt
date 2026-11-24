@@ -665,10 +665,17 @@ class GShockAPI(private val context: Context) : IGShockAPI {
      * @see AppNotification for notification object structure
      * @see NotificationType for supported notification types */
     override fun sendAppNotification(notification: AppNotification) {
+        queueAppNotification(notification)
+    }
+
+    override suspend fun sendAppNotificationAndWait(notification: AppNotification): org.avmedia.gshockapi.casio.NotificationSender.Outcome =
+        queueAppNotification(notification).await()
+
+    private fun queueAppNotification(notification: AppNotification): kotlinx.coroutines.Deferred<org.avmedia.gshockapi.casio.NotificationSender.Outcome> {
         val encodedBuffer = AppNotificationIO.encodeNotificationPacket(NotificationIds.assign(notification))
         val encryptedBuffer = AppNotificationIO.xorEncodeBuffer(encodedBuffer)
         org.avmedia.gshockapi.casio.NotificationSender.spacingMs = if (WatchInfo.protocol === org.avmedia.gshockapi.protocols.H5600Protocol) 2_000L else 500L
-        org.avmedia.gshockapi.casio.NotificationSender.send(encryptedBuffer)
+        return org.avmedia.gshockapi.casio.NotificationSender.send(encryptedBuffer)
     }
 
     /**
@@ -676,7 +683,7 @@ class GShockAPI(private val context: Context) : IGShockAPI {
      *
      * @return true if the notification service is supported.
      */
-    override fun supportsAppNotifications(): Boolean = WatchInfo.showsAppNotifications(Connection.isServiceSupported(GetSetMode.NOTIFY))
+    override fun supportsAppNotifications(): Boolean = WatchInfo.showsAppNotificationsNow(Connection.serviceFound(GetSetMode.NOTIFY))
 
     /**
      * Set settings to the watch. Populate a [Settings] and call this function. Example:

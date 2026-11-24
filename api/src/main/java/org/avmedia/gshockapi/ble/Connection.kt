@@ -178,6 +178,16 @@ object Connection {
 
     fun isServiceSupported(handle: GetSetMode): Boolean = bleManager?.isServiceSupported(handle) == true
 
+    /**
+     * Whether this link lists the characteristic for [handle]: null while it is not known (no link yet, or between a drop
+     * and the next service discovery of an always-connected watch), so a caller does not take "not discovered yet" for
+     * "this watch has none".
+     */
+    fun serviceFound(handle: GetSetMode): Boolean? {
+        val m = bleManager ?: return null
+        return if (m.servicesKnown()) m.isServiceSupported(handle) else null
+    }
+
     fun startConnection(
         context: Context,
         deviceId: String?,

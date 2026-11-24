@@ -100,6 +100,17 @@ class OcwFirstConnectionTest {
         assertFalse(WatchInfo.showsAppNotifications(serviceFound = false))
     }
 
+    // 2026-11-24 19:01:42: a GBX-H5600 reconnecting (link back, services not discovered yet) was told it cannot show them.
+    @Test fun whileTheServicesAreNotKnownTheModelDecides() {
+        WatchInfo.setModelForTest("CASIO GBX-H5600")
+        assertTrue(WatchInfo.showsAppNotificationsNow(serviceFound = null))
+        assertTrue(WatchInfo.showsAppNotificationsNow(serviceFound = true))
+        assertFalse(WatchInfo.showsAppNotificationsNow(serviceFound = false))
+        WatchInfo.setModelForTest("CASIO OCW-S7000")
+        assertFalse(WatchInfo.showsAppNotificationsNow(serviceFound = null))
+        assertFalse(WatchInfo.showsAppNotificationsNow(serviceFound = true))
+    }
+
     @Test fun aFailedNotificationWriteIsLoggedAsOneAndNotAsARequestOfItsFirstByte() = runBlocking {
         transport.ok = false
         // An inverted notification text whose first byte happens to be 0x20.

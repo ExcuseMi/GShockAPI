@@ -81,4 +81,25 @@ class NotificationSenderTest {
         NotificationGate.onManager("0x3D 30 00 02 01")
         assertTrue(NotificationGate.allowed())
     }
+
+    // 2026-11-24: a plugin's text was reported "done" before anything was written; the caller now gets how it ended.
+    @Test fun aSentTextSaysSent() = runBlocking {
+        assertEquals(NotificationSender.Outcome.SENT, NotificationSender.send(ByteArray(30)).await())
+    }
+
+    @Test fun aFailedChunkSaysWriteFailed() = runBlocking {
+        NotificationSender.writer = { written += it.size; false }
+        assertEquals(NotificationSender.Outcome.WRITE_FAILED, NotificationSender.send(ByteArray(30)).await())
+    }
+
+    @Test fun aTextHeldTooLongSaysSo() = runBlocking {
+        NotificationSender.holdLimitMs = 50
+        NotificationGate.onManager("0x3D 11")
+        assertEquals(NotificationSender.Outcome.HELD_TOO_LONG, NotificationSender.send(ByteArray(10)).await())
+        assertTrue(written.isEmpty())
+    }
+
+    @Test fun anEmptyTextIsNotSent() = runBlocking {
+        assertEquals(NotificationSender.Outcome.EMPTY, NotificationSender.send(ByteArray(0)).await())
+    }
 }

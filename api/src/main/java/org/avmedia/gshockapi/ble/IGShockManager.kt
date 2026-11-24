@@ -79,6 +79,9 @@ interface GShock {
     ): Boolean = writeChecked(handle, data)
 
     fun isServiceSupported(handle: GetSetMode): Boolean
+
+    /** True once this link's characteristics are discovered; false while the link is away (between a drop and the next discovery). */
+    fun servicesKnown(): Boolean = true
 }
 
 class IGShockManager(
@@ -443,6 +446,8 @@ private class GShockManagerImpl(
     └─ Characteristic: 26eb002e-b012-49a8-b1f8-394fb2032b0f (WRITE_NO_RESPONSE)         handle 0x0017  SP_REQUEST
     └─ Characteristic: 26eb002f-b012-49a8-b1f8-394fb2032b0f (WRITE | NOTIFY)            handle 0x0019  SP_DATA
      */
+
+    override fun servicesKnown(): Boolean = characteristicUUIDs.isNotEmpty()
 
     override fun isServiceSupported(handle: GetSetMode): Boolean {
         val uuid =

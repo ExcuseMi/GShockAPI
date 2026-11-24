@@ -1,11 +1,11 @@
 package org.avmedia.gshockapi.casio
 
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Deferred
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.async
 import kotlinx.coroutines.delay
-import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import org.avmedia.gshockapi.ble.GetSetMode
@@ -61,6 +61,9 @@ object NotificationGate {
  * at a time.
  */
 object NotificationSender {
+    /** How one text ended. Only [SENT] means every chunk got its write result. */
+    enum class Outcome { SENT, HELD_TOO_LONG, WRITE_FAILED, EMPTY }
+
     /** 2000 ms for the DW-H5600 family, 500 ms for other models. */
     @Volatile var spacingMs = LongProcess.NOTIFICATION_TEXTS.chunkGapMs ?: 2_000L
 
@@ -82,12 +85,24 @@ object NotificationSender {
     fun chunks(buffer: ByteArray, size: Int): List<ByteArray> =
         if (size <= 0) emptyList() else buffer.toList().chunked(size).map { it.toByteArray() }
 
-    /** Queues [buffer] (already inverted). The job ends when the text is sent, dropped or held back too long. */
-    fun send(buffer: ByteArray): Job =
-        scope.launch {
-            mutex.withLock {
-                if (awaitAllowed()) writePieces(buffer)
+    /**
+     * Queues [buffer] (already inverted). The result comes when the text is sent, dropped or held back too long; each
+     * outcome is one line in the watch log (a text that never reached the watch was silent before, 2026-11-24).
+     */
+    fun send(buffer: ByteArray): Deferred<Outcome> =
+        scope.async {
+            val outcome = mutex.withLock {
+                if (!awaitAllowed()) Outcome.HELD_TOO_LONG else writePieces(buffer)
             }
+            ConnectionKeepAlive.log(
+                when (outcome) {
+                    Outcome.SENT -> "notification text sent (${buffer.size} bytes)"
+                    Outcome.HELD_TOO_LONG -> "notification text dropped: the watch did not allow it for ${holdLimitMs / 1000} s"
+                    Outcome.WRITE_FAILED -> "notification text dropped: a chunk write failed"
+                    Outcome.EMPTY -> "notification text dropped: empty"
+                },
+            )
+            Outcome.SENT // RED CHECK: every text reported sent, as before
         }
 
     /** False when the watch did not allow a text within [holdLimitMs]: the text is dropped. */
@@ -105,14 +120,16 @@ object NotificationSender {
     }
 
     /** The text in chunks, [spacingMs] apart; a failed chunk drops the rest. */
-    private suspend fun writePieces(buffer: ByteArray) {
+    private suspend fun writePieces(buffer: ByteArray): Outcome {
         val pieces = chunks(buffer, NotificationGate.chunkSize())
+        if (pieces.isEmpty()) return Outcome.EMPTY
         for ((i, piece) in pieces.withIndex()) {
             if (!writer(piece)) {
                 Timber.w("Notification text: chunk ${i + 1} of ${pieces.size} failed, the rest is dropped")
-                return
+                return Outcome.WRITE_FAILED
             }
             if (i < pieces.size - 1) delay(spacingMs)
         }
+        return Outcome.SENT
     }
 }
