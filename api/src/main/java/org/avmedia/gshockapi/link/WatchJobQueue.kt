@@ -22,7 +22,8 @@ enum class LinkState { DISCONNECTED, SETTING_UP, READY }
 
 /**
  * The jobs of one watch link and the only way to its frame sequencer ([WatchQueue]): one job holds the link at a time.
- * The next one is the waiting job with the highest priority, first asked first within a priority; the setup after a
+ * The next one is the waiting job with the highest priority; within a priority the sources take turns (round robin),
+ * and a source's own jobs run in the order asked; the setup after a
  * (re)connect goes before all of them and nothing else runs until it ended. A long job gives the link up at its block
  * boundaries ([JobScope.yieldPoint]) when a job of higher priority waits, and gets it back before any job of its own
  * priority that came later.
@@ -33,6 +34,8 @@ class WatchJobQueue internal constructor(
     initial: LinkState = LinkState.DISCONNECTED,
 ) {
     private class Ticket(val spec: JobSpec, val rank: Int, val seq: Long, val setup: Boolean) {
+        /** The round of its source within its priority: set once, before the ticket first waits. */
+        var round = 0L
         var granted = CompletableDeferred<Unit>()
         var started = false
 
@@ -41,10 +44,16 @@ class WatchJobQueue internal constructor(
     }
 
     private val lock = Any()
-    private val waiting = TreeSet<Ticket>(compareBy<Ticket>({ it.rank }, { it.seq }))
+    private val waiting = TreeSet<Ticket>(compareBy<Ticket>({ it.rank }, { it.round }, { it.seq }))
     private val live = mutableSetOf<Ticket>()
     private var holder: Ticket? = null
     private val seq = AtomicLong()
+
+    /** Per priority: the round of the job that got the link last. */
+    private val servedRound = HashMap<Int, Long>()
+
+    /** Per priority and source: the round its next job gets. */
+    private val nextRound = HashMap<Pair<Int, JobSource>, Long>()
     private var setupGeneration = 0L
     private val _state = MutableStateFlow(initial)
 
@@ -150,6 +159,7 @@ class WatchJobQueue internal constructor(
         // In the line before the job's coroutine runs: the order of asking is the order of running.
         synchronized(lock) {
             live += t
+            t.round = roundLocked(t)
             enlistLocked(t)
         }
         job.start()
@@ -171,6 +181,17 @@ class WatchJobQueue internal constructor(
         else -> "Cancelled."
     }
 
+    /**
+     * Round robin between the sources of one priority: a source's jobs take rounds one after the other, and a source that
+     * had nothing waiting starts at the round being served now. So one plugin with many jobs cannot hold back another.
+     */
+    private fun roundLocked(t: Ticket): Long {
+        val key = t.rank to t.spec.source
+        val round = maxOf(nextRound[key] ?: 0L, servedRound[t.rank] ?: 0L)
+        nextRound[key] = round + 1
+        return round
+    }
+
     private fun enlistLocked(t: Ticket) {
         t.granted = CompletableDeferred()
         waiting += t
@@ -190,6 +211,7 @@ class WatchJobQueue internal constructor(
         waiting.remove(next)
         holder = next
         next.started = true
+        servedRound[next.rank] = maxOf(servedRound[next.rank] ?: 0L, next.round)
         next.granted.complete(Unit)
     }
 

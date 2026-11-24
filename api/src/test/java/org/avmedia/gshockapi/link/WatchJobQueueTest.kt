@@ -55,6 +55,39 @@ class WatchJobQueueTest {
         assertEquals(listOf("w 11", "w 12", "w 21", "w 22", "w 31", "w 32", "w 41"), gatt.writes())
     }
 
+    @Test fun sourcesOfOnePriorityTakeTurns() = runBlocking {
+        val gatt = FakeGatt()
+        val link = readyLink(links, "A", gatt)
+        val gate = CompletableDeferred<Unit>()
+        val holding = CompletableDeferred<Unit>()
+        link.submit(spec("blocker", JobPriority.COMMAND)) { holding.complete(Unit); gate.await() }
+        holding.await()
+        fun ask(plugin: String, tag: Int) =
+            link.submit(JobSpec("$plugin $tag", JobSource.Plugin(plugin), JobPriority.COMMAND)) { exchange(GetSetMode.CONVOY, bytes(tag)) }
+        val asked = listOf(ask("a", 0xA1), ask("a", 0xA2), ask("a", 0xA3), ask("a", 0xA4), ask("b", 0xB1), ask("b", 0xB2), ask("c", 0xC1))
+        gate.complete(Unit)
+        asked.awaitAll()
+        assertEquals(listOf("w A1", "w B1", "w C1", "w A2", "w B2", "w A3", "w A4"), gatt.writes())
+    }
+
+    @Test fun aSourceThatComesLateIsNotPutBehindEveryJobOfABusyOne() = runBlocking {
+        val gatt = FakeGatt(writeMs = 3)
+        val link = readyLink(links, "A", gatt)
+        val late = AtomicReference<Deferred<JobOutcome<Outcome>>?>(null)
+        gatt.onWrite = { f ->
+            if (f[0] == 0x03.toByte() && late.get() == null) {
+                late.set(link.submit(JobSpec("b", JobSource.Plugin("b"), JobPriority.COMMAND)) { exchange(GetSetMode.CONVOY, bytes(0xB1)) })
+            }
+        }
+        val busy = (1..20).map { n ->
+            link.submit(JobSpec("a $n", JobSource.Plugin("a"), JobPriority.COMMAND)) { exchange(GetSetMode.CONVOY, bytes(n)) }
+        }
+        busy.awaitAll()
+        late.get()!!.await()
+        val w = gatt.writes()
+        assertEquals("b runs right after the job of a that was on the air: $w", w.indexOf("w 03") + 1, w.indexOf("w B1"))
+    }
+
     @Test fun aUserActionDuringA30BlockTransferRunsWithinOneBlockAndTheTransferResumesWithoutLoss() = runBlocking {
         val gatt = FakeGatt(writeMs = 5)
         val link = readyLink(links, "A", gatt)
