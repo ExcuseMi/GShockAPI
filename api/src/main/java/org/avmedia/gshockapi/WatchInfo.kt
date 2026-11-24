@@ -407,12 +407,13 @@ data object WatchInfo {
                 vibrate = true, chimeInSettings = true,
                 findButtonUserDefined = true,
                 shortLightDuration = "1.5s", longLightDuration = "5s",
-                hasBatteryLevel = false, alwaysConnected = true, hasDateFormat = false,
+                hasBatteryLevel = true, batteryLevelLowerLimit = 0, batteryLevelUpperLimit = 6,
+                alwaysConnected = true, hasDateFormat = false,
                 weekLanguageSupported = false,
                 hasStepCounter = true,
                 protocol = H5600Protocol,
             ),
-            // Module 3586: DW-H5600 protocol plus tide; battery level from 0x28 index 1 as 0 to 6
+            // Module 3586: DW-H5600 protocol plus tide
             ModelInfo(
                 model = WatchModel.GBX_H5600,
                 alarmCount = 4,
@@ -604,7 +605,7 @@ data object WatchInfo {
             // Module 5672: MTG-B3000
             put("MTG-B3000", WatchModel.MTG_B3000)
             // Module 5701: OCW-S7000
-            put("OCW-S7000", WatchModel.GENERIC)
+            put("OCW-S7000", WatchModel.OCW_S400)
             // Module 5713: GWG-B1000
             put("GWG-B1000", WatchModel.GW)
             // Module 5728: OCW-S400
