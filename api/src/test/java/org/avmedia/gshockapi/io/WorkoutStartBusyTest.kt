@@ -173,15 +173,17 @@ class WorkoutStartAfterExchangeTest {
     @Test fun aWorkoutReadRightAfterALifeLogWaitsAndIsNotRefused() = runBlocking {
         install(refusals = 0)
         H5600WorkoutIO.sink = { true }
-        // The LifeLog read as a job that just ended.
+        // The LifeLog read as a job that just ended. Its quiet runs from its release, a few ms before [ended]: the watch
+        // here refuses up to 100 ms less than the quiet (it refused a start 5 ms after the end).
         assertTrue(WatchLink.transfer("LifeLog read", 5_000, quiet = true) {}.await().ok)
         val ended = System.currentTimeMillis()
+        val refuseMs = org.avmedia.gshockapi.link.JobSpec.TRANSFER_SETTLE_MS - 100
         val inner = H5600WorkoutIO.link!!
         H5600WorkoutIO.link = object : WorkoutLink {
             override fun drsp(data: ByteArray) = inner.drsp(data)
 
             override fun bulk(data: ByteArray) {
-                if (data.size == 3 && data.all { it.toInt() == 0 } && System.currentTimeMillis() - ended < 3_000) {
+                if (data.size == 3 && data.all { it.toInt() == 0 } && System.currentTimeMillis() - ended < refuseMs) {
                     writes += "bulk 000000 refused"
                     H5600WorkoutIO.onConvoy("03 01")
                     return
