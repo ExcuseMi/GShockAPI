@@ -40,7 +40,7 @@ class LinkWatchStateTest {
         assertNotSame(a.cache, SingleWatchLink.cache)
         assertNotSame(a.button, SingleWatchLink.button)
         assertNotSame(a.rawSettings, SingleWatchLink.rawSettings)
-        assertNotSame(a.connection.routes, SingleWatchLink.connectionRoutes)
+        assertNotSame(a.connection.routes, SingleWatchLink.link.connection.routes)
     }
 
     @Test fun theModelOfAIsAsAloneAndTheSingleWatchInfoReadsTheOneLink(): Unit = runBlocking {

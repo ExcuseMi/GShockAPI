@@ -52,8 +52,8 @@ object WatchLink {
     /** The one link's time, for the single-watch time code ([org.avmedia.gshockapi.io.TimeIO] and the DST, world city and home time reads). */
     val time: org.avmedia.gshockapi.io.LinkTime get() = link.time
 
-    /** The frames the one link's upkeep and setup take, for the single-watch protocol's routing ([org.avmedia.gshockapi.protocols.H5600Protocol]). */
-    val connectionRoutes: ConnectionRoutes get() = link.connection.routes
+    /** The one link's dispatcher, for the single-watch [MessageDispatcher]. */
+    val dispatcher: LinkDispatcher get() = link.dispatcher
 
     /** What only the one link has. A link from the registry has none of this. */
     private fun singleWatchHooks(link: org.avmedia.gshockapi.link.WatchLink) {

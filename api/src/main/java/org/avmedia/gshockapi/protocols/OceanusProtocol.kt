@@ -10,6 +10,7 @@ import org.avmedia.gshockapi.casio.CasioTimeZoneHelper
 import org.avmedia.gshockapi.io.ButtonPressedIO
 import org.avmedia.gshockapi.io.TimeAdjustmentIO
 import org.avmedia.gshockapi.io.TimeIO
+import org.avmedia.gshockapi.link.WatchLink
 import org.avmedia.gshockapi.model.Alarm
 import org.avmedia.gshockapi.model.ExerciseProfile
 import org.avmedia.gshockapi.model.Settings
@@ -33,8 +34,13 @@ import java.time.ZoneId
 @RequiresApi(Build.VERSION_CODES.O)
 object OceanusProtocol : StandardProtocol() {
     override val dataReceivedHandlers: Map<Int, (String) -> Unit>
+        get() = super.dataReceivedHandlers + own
+
+    /** Its own answers win over a link's time reads too. */
+    override fun linkHandlers(link: WatchLink): Map<Int, (String) -> Unit> = super.linkHandlers(link) + own
+
+    private val own: Map<Int, (String) -> Unit>
         get() =
-            super.dataReceivedHandlers +
                 mapOf(
                     // DST watch state, DST setting
                     0x1D to OceanusIO::onReceived,

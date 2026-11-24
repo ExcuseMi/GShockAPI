@@ -4,7 +4,6 @@ import android.os.Build
 import androidx.annotation.RequiresApi
 import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
-import org.avmedia.gshockapi.casio.CasioConstants
 import org.avmedia.gshockapi.casio.WatchLink
 import org.avmedia.gshockapi.link.JobScope
 import org.avmedia.gshockapi.model.WorkoutSession
@@ -51,26 +50,10 @@ object H5600WorkoutIO {
      * the guess from the bytes is only the fallback when the connection code did not say. The
      * watch's `09 1D` (all sent) is longer than 2 bytes, the guess called it a status frame and the read never answered it.
      */
-    fun channelOf(hex: String): H5600Channel =
-        when (WatchLink.currentSource()) {
-            CasioConstants.CASIO_DATA_REQUEST_CHARACTERISTIC_UUID -> H5600Channel.DRSP
-            CasioConstants.CASIO_CONVOY_CHARACTERISTIC_UUID -> H5600Channel.CONVOY
-            null -> channelOf(h5600Bytes(hex))
-            else -> H5600Channel.STATUS
-        }
+    fun channelOf(hex: String): H5600Channel = H5600WorkoutReader.channelOf(WatchLink.currentSource(), hex)
 
     /** The guess from the bytes alone (no characteristic known). Single bytes are never bulk. */
-    fun channelOf(data: ByteArray): H5600Channel {
-        val first = data.firstOrNull()?.toInt()?.and(0xFF) ?: return H5600Channel.STATUS
-        return when {
-            data.size <= 2 && first in DRSP_FIRST -> H5600Channel.DRSP
-            data.size > 2 && first <= BULK_LAST -> H5600Channel.CONVOY
-            else -> H5600Channel.STATUS
-        }
-    }
-
-    private val DRSP_FIRST = setOf(0x00, 0x03, 0x04, 0x06, 0x07, 0x08, 0x09)
-    private const val BULK_LAST = 0x07
+    fun channelOf(data: ByteArray): H5600Channel = H5600WorkoutReader.channelOf(data)
 
     fun onDrsp(hex: String) = reader.onDrsp(hex)
 

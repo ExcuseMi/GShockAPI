@@ -43,7 +43,7 @@ class LinkSourceCheckTest {
 
     /** The LifeLog, workout and tide transfers write only from their own job (its outbox and post), never as loose commands. */
     @Test fun theTransfersWriteOnlyFromTheirJob() {
-        val transfers = setOf("H5600HealthIO.kt", "H5600WorkoutIO.kt", "H5600LifeLogReader.kt", "H5600WorkoutReader.kt", "H5600WorkoutTransfer.kt", "TideTransferIO.kt", "TideTransfer.kt", "JobWorkoutLink.kt")
+        val transfers = setOf("H5600HealthIO.kt", "H5600WorkoutIO.kt", "H5600LifeLogReader.kt", "H5600WorkoutReader.kt", "H5600WorkoutTransfer.kt", "TideTransferIO.kt", "TideTransfer.kt", "JobWorkoutLink.kt", "H5600TideSender.kt")
         val bad = filesWith(Regex("""\bIO\.(writeCmd|writeChecked|request)\(|\bWatchLink\.write(Checked)?\(""")) intersect transfers
         assertTrue("a transfer writes outside its job: $bad", bad.isEmpty())
         assertEquals("the transfer files are found", transfers, sources().map { it.name }.toSet() intersect transfers)
@@ -105,15 +105,13 @@ class LinkSourceCheckTest {
         only(
             "the single-watch connection context",
             Regex("""\bWatchLink\.connection\b"""),
-            setOf(
-                "GShockAPI.kt", "IGShockManager.kt", "NotificationSubscriptions.kt",
-            ),
+            setOf("GShockAPI.kt"),
         )
 
     /** The per-link transfer and notification code reaches nothing of the single-watch adapter: only its own link. */
     @Test fun thePerLinkTransfersAndTextsReachOnlyTheirLink() {
-        val perLink = setOf("H5600LifeLogReader.kt", "H5600WorkoutReader.kt", "LinkTransfers.kt", "LinkNotifications.kt")
-        val single = Regex("""\bcasio\.WatchLink\b|import org\.avmedia\.gshockapi\.casio\.WatchLink\b|(?<![\w.])WatchLink\.(?!kt)\w+|\b(H5600HealthIO|H5600WorkoutIO|NotificationGate|WatchInfo|CachedIO|ButtonPressedIO|RawSettingIO)\.|\bNotificationSender\.(?!Outcome\b)""")
+        val perLink = setOf("H5600LifeLogReader.kt", "H5600WorkoutReader.kt", "H5600TideSender.kt", "LinkTransfers.kt", "LinkNotifications.kt")
+        val single = Regex("""\bcasio\.WatchLink\b|import org\.avmedia\.gshockapi\.casio\.WatchLink\b|(?<![\w.])WatchLink\.(?!kt)\w+|\b(H5600HealthIO|H5600WorkoutIO|TideTransferIO|NotificationGate|WatchInfo|CachedIO|ButtonPressedIO|RawSettingIO)\.|\bNotificationSender\.(?!Outcome\b)""")
         val found = sources().filter { it.name in perLink }
         assertEquals("the per-link files are found", perLink, found.map { it.name }.toSet())
         val bad = found.filter { single.containsMatchIn(it.readText()) }.map { "${it.name}: ${single.find(it.readText())!!.value}" }
@@ -125,7 +123,7 @@ class LinkSourceCheckTest {
             }
         }
         only("per-link transfers or texts made", Regex("""(?<!class )\b(LinkTransfers|LinkNotifications)\("""), setOf("WatchLink.kt"))
-        only("a per-link reader or sender made", Regex("""(?<!class )\b(H5600LifeLogReader|H5600WorkoutReader|LinkNotificationSender|LinkNotificationGate)\("""), setOf("LinkTransfers.kt", "LinkNotifications.kt"))
+        only("a per-link reader or sender made", Regex("""(?<!class )\b(H5600LifeLogReader|H5600WorkoutReader|H5600TideSender|LinkNotificationSender|LinkNotificationGate)\("""), setOf("LinkTransfers.kt", "LinkNotifications.kt"))
     }
 
     /** The single-watch route to the one link's transfers and texts: only their deprecated adapters (step 5 removes them). */
@@ -133,7 +131,7 @@ class LinkSourceCheckTest {
         only(
             "the single-watch transfers or texts",
             Regex("""\bWatchLink\.(transfers|notifications)\b"""),
-            setOf("H5600HealthIO.kt", "H5600WorkoutIO.kt", "NotificationSender.kt"),
+            setOf("H5600HealthIO.kt", "H5600WorkoutIO.kt", "TideTransferIO.kt", "NotificationSender.kt"),
         )
 
     /**
@@ -165,10 +163,29 @@ class LinkSourceCheckTest {
             "the single-watch watch info, cache, button info, settings reads or routes",
             Regex("""\bWatchLink\.(watchInfo|cache|button|rawSettings|connectionRoutes|time)\b"""),
             setOf(
-                "WatchInfo.kt", "CachedIO.kt", "ButtonPressedIO.kt", "RawSettingIO.kt", "H5600Protocol.kt",
+                "WatchInfo.kt", "CachedIO.kt", "ButtonPressedIO.kt", "RawSettingIO.kt",
                 "TimeIO.kt", "DstWatchStateIO.kt", "DstForWorldCitiesIO.kt", "WorldCitiesIO.kt", "HomeTimeIO.kt",
             ),
         )
+
+    /**
+     * A link's frames go through its own dispatcher to its own objects: the dispatcher reaches nothing of the single-watch
+     * adapters and is made only by its link; the single-watch [org.avmedia.gshockapi.casio.MessageDispatcher] only hands
+     * the frame to the one link's dispatcher; the H5600 routing reaches the transfers, the gate and the setup of the link
+     * it is given, never the single-watch ones.
+     */
+    @Test fun aLinksFramesGoThroughItsOwnDispatcher() {
+        val single = Regex("""\bcasio\.WatchLink\b|(?<![\w.])WatchLink\.(?!kt)\w+|\b(H5600HealthIO|H5600WorkoutIO|TideTransferIO|NotificationGate|CachedIO|ButtonPressedIO|RawSettingIO|TimeIO|WatchInfo)\.""")
+        val dispatcher = sources().single { it.name == "LinkDispatcher.kt" }.readText()
+        assertFalse("the link dispatcher reaches the single-watch adapter: ${single.find(dispatcher)?.value}", single.containsMatchIn(dispatcher))
+        only("a link dispatcher made", Regex("""(?<!class )\bLinkDispatcher\("""), setOf("WatchLink.kt"))
+        only("the single-watch dispatcher", Regex("""\bWatchLink\.dispatcher\b"""), setOf("MessageDispatcher.kt"))
+        val message = sources().single { it.name == "MessageDispatcher.kt" }.readText()
+        Regex("""\.offer\(|dataReceivedHandlers|extractKey|linkHandlers""").find(message)?.let { fail("MessageDispatcher routes by itself: ${it.value}") }
+        val h5600 = sources().single { it.name == "H5600Protocol.kt" }.readText()
+        val h5600Single = Regex("""\bcasio\.WatchLink\b|(?<![\w.])WatchLink\.(?!kt)\w+|\b(H5600WorkoutIO|TideTransferIO|NotificationGate)[.:]|\bH5600HealthIO(\.(?!request\b)|::)""")
+        h5600Single.find(h5600)?.let { fail("H5600Protocol reaches the single-watch transfers, gate or setup: ${it.value}") }
+    }
 
     /** The single-watch time code holds nothing of a watch: no answer it waits for, no time zone; the link's [org.avmedia.gshockapi.io.LinkTime] does. */
     @Test fun theSingleWatchTimeHoldsNoState() {

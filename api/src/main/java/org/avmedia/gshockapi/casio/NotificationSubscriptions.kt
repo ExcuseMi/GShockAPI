@@ -15,11 +15,11 @@ object NotificationSubscriptions {
 
     @Volatile private var linkStartedAt = 0L
 
-    /** A new service discovery: forget the old subscriptions and start the logging window. */
+    /** A new service discovery at [now] (the link's clock): forget the old subscriptions and start the logging window. */
     @Synchronized
-    fun beginDiscovery() {
+    fun beginDiscovery(now: Long) {
         subscribed.clear()
-        linkStartedAt = WatchLink.connection.keepAlive.clock()
+        linkStartedAt = now
     }
 
     /** True when [uuid] still has to be subscribed on this link. */
@@ -29,9 +29,9 @@ object NotificationSubscriptions {
     @Synchronized
     fun clear() = subscribed.clear()
 
-    /** Logs the characteristic and the first two bytes of a notification during the first 90 s of the link. */
-    fun logNotification(characteristic: UUID, hex: String?) {
-        val age = WatchLink.connection.keepAlive.clock() - linkStartedAt
+    /** Logs the characteristic and the first two bytes of a notification that came at [now] during the first 90 s of the link. */
+    fun logNotification(characteristic: UUID, hex: String?, now: Long) {
+        val age = now - linkStartedAt
         if (linkStartedAt == 0L || age < 0 || age > LOG_WINDOW_MS) return
         val bytes = hex.orEmpty().removePrefix("0x").split(' ').filter { it.isNotBlank() }.map { it.removePrefix("0x") }
         ConnectionKeepAlive.log(

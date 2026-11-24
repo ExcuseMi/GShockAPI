@@ -38,6 +38,32 @@ class H5600WorkoutReader internal constructor(private val link: WatchLink) {
 
         /** The longest a workout read holds its job (a full watch is a few minutes on the slow link). */
         internal const val JOB_DEADLINE_MS = 10 * 60 * 1000L
+
+        /**
+         * Which characteristic a message that came on [source] belongs to while a workout or tide transfer runs. The
+         * characteristic decides; the guess from the bytes is only the fallback when the connection code did not say. The
+         * watch's `09 1D` (all sent) is longer than 2 bytes, the guess called it a status frame and the read never answered it.
+         */
+        fun channelOf(source: java.util.UUID?, hex: String): H5600Channel =
+            when (source) {
+                org.avmedia.gshockapi.casio.CasioConstants.CASIO_DATA_REQUEST_CHARACTERISTIC_UUID -> H5600Channel.DRSP
+                org.avmedia.gshockapi.casio.CasioConstants.CASIO_CONVOY_CHARACTERISTIC_UUID -> H5600Channel.CONVOY
+                null -> channelOf(h5600Bytes(hex))
+                else -> H5600Channel.STATUS
+            }
+
+        /** The guess from the bytes alone (no characteristic known). Single bytes are never bulk. */
+        fun channelOf(data: ByteArray): H5600Channel {
+            val first = data.firstOrNull()?.toInt()?.and(0xFF) ?: return H5600Channel.STATUS
+            return when {
+                data.size <= 2 && first in DRSP_FIRST -> H5600Channel.DRSP
+                data.size > 2 && first <= BULK_LAST -> H5600Channel.CONVOY
+                else -> H5600Channel.STATUS
+            }
+        }
+
+        private val DRSP_FIRST = setOf(0x00, 0x03, 0x04, 0x06, 0x07, 0x08, 0x09)
+        private const val BULK_LAST = 0x07
     }
 
     /** Called for every downloaded workout, before the fetched mark; return true only when it is stored. */

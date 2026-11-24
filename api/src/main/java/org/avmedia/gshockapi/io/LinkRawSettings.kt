@@ -51,7 +51,7 @@ internal class LinkSettingWire(private val link: WatchLink) : SettingLink {
  *
  * Read:  the request on the read-request characteristic (GetSetMode.GET, 26eb002c): the code alone, `3D 30` for 0x3D,
  *        or several bytes. The watch answers with a notification whose first byte is the code, or `FF ...` when it refuses.
- *        [MessageDispatcher] offers every notification to [offer] first: it takes only the answer to the request that waits
+ *        The link's dispatcher offers every notification to [offer] first: it takes only the answer to the request that waits
  *        and passes everything else (LifeLog, CONVOY, other codes) on, so no handler is ever replaced.
  * Write: the full packet on the all-features characteristic (GetSetMode.SET, 26eb002d); [safeWriter] reads, changes
  *        only the target bytes, writes with a write result and reads back.
@@ -181,7 +181,7 @@ class LinkRawSettings internal constructor(private val watchLink: WatchLink) {
     private fun ByteArray.toHex() = joinToString(" ") { "%02X".format(it.toInt() and 0xFF) }
 
     /**
-     * Called by [org.avmedia.gshockapi.casio.MessageDispatcher] for every notification before anything else.
+     * Called by this link's [org.avmedia.gshockapi.casio.LinkDispatcher] for every notification before anything else.
      * Takes the answer to the request that waits (first byte = its code), or an `FF` refusal while one waits;
      * returns false for everything else, which then goes to the library as usual.
      */

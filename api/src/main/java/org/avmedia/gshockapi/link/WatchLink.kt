@@ -12,6 +12,7 @@ import org.avmedia.gshockapi.LinkWatchInfo
 import org.avmedia.gshockapi.ble.GetSetMode
 import org.avmedia.gshockapi.casio.ConnectionContext
 import org.avmedia.gshockapi.casio.ConnectionKeepAlive
+import org.avmedia.gshockapi.casio.LinkDispatcher
 import org.avmedia.gshockapi.casio.LinkNotifications
 import org.avmedia.gshockapi.casio.LinkWriter
 import org.avmedia.gshockapi.casio.Outcome
@@ -75,6 +76,9 @@ class WatchLink internal constructor(
 
     /** This link's notification texts: its watch's gate (`3D`, the MTU) and one text at a time, held while a transfer runs. */
     val notifications: LinkNotifications = LinkNotifications(this) { transfers.busy }
+
+    /** Where this link's watch's notifications go: to this link's own objects. */
+    val dispatcher: LinkDispatcher = LinkDispatcher(this)
 
     init {
         connection.setup.busy = { transfers.busy }

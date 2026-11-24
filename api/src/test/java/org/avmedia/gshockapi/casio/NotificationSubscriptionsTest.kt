@@ -24,19 +24,19 @@ class NotificationSubscriptionsTest {
     @After fun restore() { singleKeepAlive.clock = System::currentTimeMillis }
 
     @Test fun aReconnectSubscribesAgain() {
-        NotificationSubscriptions.beginDiscovery()
+        NotificationSubscriptions.beginDiscovery(now)
         assertTrue(NotificationSubscriptions.claim(ch))
         assertFalse(NotificationSubscriptions.claim(ch))
-        NotificationSubscriptions.beginDiscovery() // drop and reconnect: new discovery
+        NotificationSubscriptions.beginDiscovery(now) // drop and reconnect: new discovery
         assertTrue(NotificationSubscriptions.claim(ch))
     }
 
     @Test fun firstTwoBytesAreLoggedOnlyInTheFirst90Seconds() {
-        NotificationSubscriptions.beginDiscovery()
+        NotificationSubscriptions.beginDiscovery(now)
         now += 5_000
-        NotificationSubscriptions.logNotification(ch, "0x49 00 12 34")
+        NotificationSubscriptions.logNotification(ch, "0x49 00 12 34", now)
         now += 90_000
-        NotificationSubscriptions.logNotification(ch, "0x49 00")
+        NotificationSubscriptions.logNotification(ch, "0x49 00", now)
         val log = TestLog.recentEvents()
         assertEquals(1, log.size)
         assertTrue(log[0], log[0].endsWith("rx +5s 002d: 49 00"))

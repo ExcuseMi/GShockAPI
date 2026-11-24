@@ -144,7 +144,7 @@ private class GShockManagerImpl(
         }
 
         // A new link: notifications must be enabled again (the descriptors are per connection).
-        org.avmedia.gshockapi.casio.NotificationSubscriptions.beginDiscovery()
+        org.avmedia.gshockapi.casio.NotificationSubscriptions.beginDiscovery(org.avmedia.gshockapi.casio.WatchLink.link.connection.keepAlive.clock())
 
         // Every characteristic that notifies gets its callback now (no GATT operation). The descriptor writes are made by
         // the link's setup job, one after the other: made here they overlapped each other and the first request
@@ -162,7 +162,7 @@ private class GShockManagerImpl(
                                 String.format("%02X", it)
                             }
                         Timber.d("Notification from ${char.uuid}: $hexData")
-                        org.avmedia.gshockapi.casio.NotificationSubscriptions.logNotification(char.uuid, hexData)
+                        org.avmedia.gshockapi.casio.NotificationSubscriptions.logNotification(char.uuid, hexData, org.avmedia.gshockapi.casio.WatchLink.link.connection.keepAlive.clock())
                         org.avmedia.gshockapi.casio.WatchLink.onNotification(char.uuid, hexData)
                         org.avmedia.gshockapi.casio.WatchLink.withSource(char.uuid) { dataReceivedCallback?.dataReceived(hexData) }
                     }
@@ -201,7 +201,7 @@ private class GShockManagerImpl(
         onConnected: OnConnectedType,
     ) {
         this.onConnected = onConnected
-        org.avmedia.gshockapi.casio.WatchLink.connection.setup.reset()
+        org.avmedia.gshockapi.casio.WatchLink.link.connection.setup.reset()
 
         connect(device)
             .retry(3, 100)
@@ -265,7 +265,7 @@ private class GShockManagerImpl(
             Timber.i("$device onDeviceConnected — waiting for service discovery")
             ProgressEvents.onNext("ConnectionStarted")
             connectionState = ConnectionState.CONNECTING
-            org.avmedia.gshockapi.casio.WatchLink.connection.setup.reset()
+            org.avmedia.gshockapi.casio.WatchLink.link.connection.setup.reset()
         }
 
         override fun onDeviceFailedToConnect(

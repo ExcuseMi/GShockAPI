@@ -28,6 +28,14 @@ import org.avmedia.gshockapi.io.WorldCitiesIO
 import org.avmedia.gshockapi.model.Alarm
 import org.avmedia.gshockapi.model.Settings
 import org.avmedia.gshockapi.model.StepCounterData
+import org.avmedia.gshockapi.link.WatchLink
+import java.util.UUID
+
+/** DW-H5600 settings packets: each reply arrives under its packet's first byte. */
+val RAW_SETTING_CODES: List<Int> = listOf(
+    H5600SettingsIO.SOUND_MODE_CODE, H5600SettingsIO.WATCH_FACE_CODE, H5600SettingsIO.TIME_MANAGER_CODE,
+    H5600SettingsIO.SMART_ALARM_CODE, 0x45, 0x4F,
+)
 
 @RequiresApi(Build.VERSION_CODES.O)
 interface WatchProtocol {
@@ -57,14 +65,23 @@ interface WatchProtocol {
                 CasioConstants.CHARACTERISTICS.GW_BX5600_SP_DATA_HEADER_03.code to GwBx5600TimeIO::onReceivedStep2,
                 CasioConstants.CHARACTERISTICS.GW_BX5600_SP_DATA_HEADER_05.code to GwBx5600TimeIO::onReceivedStep1,
                 CasioConstants.CHARACTERISTICS.GW_BX5600_SP_DATA_HEADER_06.code to GwBx5600TimeIO::onReceivedStep3,
-                // DW-H5600 settings packets: each reply arrives under its packet's first byte
-                H5600SettingsIO.SOUND_MODE_CODE to RawSettingIO::onReceived,
-                H5600SettingsIO.WATCH_FACE_CODE to RawSettingIO::onReceived,
-                H5600SettingsIO.TIME_MANAGER_CODE to RawSettingIO::onReceived,
-                H5600SettingsIO.SMART_ALARM_CODE to RawSettingIO::onReceived,
-                0x45 to RawSettingIO::onReceived,
-                0x4F to RawSettingIO::onReceived,
-            )
+            ) + RAW_SETTING_CODES.associateWith { RawSettingIO::onReceived }
+
+    /**
+     * The handlers of [link]'s frames: [dataReceivedHandlers] with that link's own objects (its time reads, button info
+     * and settings reads) in place of the single-watch ones. A protocol that routes more by link adds its own.
+     */
+    fun linkHandlers(link: WatchLink): Map<Int, (String) -> Unit> =
+        dataReceivedHandlers + linkRoutes(link)
+
+    /** The codes [link]'s own objects answer. */
+    fun linkRoutes(link: WatchLink): Map<Int, (String) -> Unit> =
+        link.time.routes +
+            (CasioConstants.CHARACTERISTICS.CASIO_BLE_FEATURES.code to link.button::onReceived) +
+            RAW_SETTING_CODES.associateWith { link.rawSettings::onReceived }
+
+    /** The handler key of [data] on [link], which came on [source] (null when the connection code did not say). */
+    fun linkKey(link: WatchLink, data: String, source: UUID?): Int? = extractKey(data)
 
     fun extractKey(data: String): Int?
 
