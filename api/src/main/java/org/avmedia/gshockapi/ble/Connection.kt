@@ -39,6 +39,8 @@ object Connection {
         override fun notifiable(): List<UUID> = bleManager?.notifiable().orEmpty()
 
         override suspend fun subscribe(characteristic: UUID): Boolean = bleManager?.subscribe(characteristic) == true
+
+        override fun serviceFound(handle: GetSetMode): Boolean? = this@Connection.serviceFound(handle)
     }
 
     init {

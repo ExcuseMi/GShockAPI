@@ -1,40 +1,23 @@
 package org.avmedia.gshockapi
 
-import org.avmedia.gshockapi.io.H5600SettingsIO
 import org.avmedia.gshockapi.model.WatchFaceItem
 import android.bluetooth.BluetoothDevice
 import android.content.Context
 import android.os.Build
 import androidx.annotation.RequiresApi
 import androidx.annotation.RequiresPermission
-import kotlinx.coroutines.CancellationException
-import kotlinx.coroutines.withTimeoutOrNull
 import org.avmedia.gshockapi.ble.Connection
 import org.avmedia.gshockapi.ble.GShockPairingManager
-import org.avmedia.gshockapi.ble.GetSetMode
-import org.avmedia.gshockapi.casio.MessageDispatcher
-import org.avmedia.gshockapi.io.AppInfoIO
-import org.avmedia.gshockapi.io.AppInfoIOFunctional
-import org.avmedia.gshockapi.io.AppNotificationIO
-import org.avmedia.gshockapi.io.ButtonPressedIO
-import org.avmedia.gshockapi.io.DstForWorldCitiesIO
-import org.avmedia.gshockapi.io.DstWatchStateIO
-import org.avmedia.gshockapi.io.ErrorIO
-import org.avmedia.gshockapi.io.EventsIO
 import org.avmedia.gshockapi.io.IO
-import org.avmedia.gshockapi.io.IO.writeCmd
 import org.avmedia.gshockapi.io.TimeAdjustmentInfo
-import org.avmedia.gshockapi.io.TimeIO
 import org.avmedia.gshockapi.io.WaitForConnectionIO
-import org.avmedia.gshockapi.io.WatchNameIO
-import org.avmedia.gshockapi.io.WorldCitiesIO
+import org.avmedia.gshockapi.link.WatchLinks
 import org.avmedia.gshockapi.model.Alarm
 import org.avmedia.gshockapi.model.Event
 import org.avmedia.gshockapi.model.ExerciseProfile
 import org.avmedia.gshockapi.model.Settings
 import org.avmedia.gshockapi.model.StepCounterData
 import timber.log.Timber
-import java.time.ZoneId
 
 /**
  * This class contains all the API functions. This should the the main interface to the library.
@@ -72,7 +55,11 @@ import java.time.ZoneId
  */
 
 @RequiresApi(Build.VERSION_CODES.O)
-class GShockAPI(private val context: Context) : IGShockAPI {
+class GShockAPI(
+    private val context: Context,
+    /** The links of the watches this API reaches by key ([watch]). */
+    val links: WatchLinks = WatchLinks(),
+) : IGShockAPI {
     /**
      * This function waits for the watch to connect to the phone.
      * When connected, it returns and emits a `ConnectionSetupComplete` event, which
@@ -99,40 +86,11 @@ class GShockAPI(private val context: Context) : IGShockAPI {
         }
     }
 
+    @Deprecated(SINGLE_WATCH)
     override suspend fun init(): Boolean {
         Timber.i(" >>> init called...")
         IO.init()
-
-        try {
-            if (withTimeoutOrNull(INITIALIZATION_REQUEST_TIMEOUT_MS) { getAppInfo() } == null) {
-                Timber.w("Timed out waiting for app info; continuing watch initialization")
-            }
-        } catch (cancelled: CancellationException) {
-            throw cancelled
-        } catch (error: Exception) {
-            Timber.e(error, "Failed to read app info; continuing watch initialization")
-        }
-
-        val button =
-            try {
-                Timber.i("Requesting watch button info")
-                withTimeoutOrNull(InitCheck.BUTTON_TIMEOUT_MS) { getPressedButton() }
-            } catch (cancelled: CancellationException) {
-                throw cancelled
-            } catch (error: Exception) {
-                Timber.e(error, "Failed to read button info")
-                null
-            }
-
-        val decision = InitCheck.decide(
-            button,
-            org.avmedia.gshockapi.casio.WatchLink.connection.setup.isAutomaticConnect(),
-            kindKnown = org.avmedia.gshockapi.casio.WatchLink.connection.setup.lastKind != null,
-        )
-        decision.log?.let {
-            Timber.w(it)
-            org.avmedia.gshockapi.casio.ConnectionKeepAlive.log(it)
-        }
+        val decision = one.initialize()
         if (!decision.complete && decision.error == null) {
             // A silent link: release it quietly; the watch advertises again and the next attempt starts.
             runCatching { disconnect() }
@@ -144,24 +102,24 @@ class GShockAPI(private val context: Context) : IGShockAPI {
             ProgressEvents.onNext("Error", decision.error)
             return false
         }
-
-        Timber.i("Watch button info received: $button")
-        try {
-            WatchInfo.protocol.onInitialized()
-        } catch (cancelled: CancellationException) {
-            throw cancelled
-        } catch (error: Exception) {
-            Timber.e(error, "Watch protocol initialization failed")
-        }
         ProgressEvents.onNext("ButtonPressedInfoReceived")
         ProgressEvents.onNext("WatchInitializationCompleted")
         Timber.i("Watch initialization complete event emitted")
         return true
     }
 
-    private companion object {
-        const val INITIALIZATION_REQUEST_TIMEOUT_MS = 3_000L
+    /**
+     * The calls on the watch of [key]: a link of [links], or the single-watch link when [key] is the connected watch's
+     * address. Null when there is none.
+     */
+    override fun watch(key: String): WatchApi? {
+        links.api(key)?.let { return it }
+        val single = org.avmedia.gshockapi.casio.WatchLink.api
+        return single.takeIf { key.isNotEmpty() && it.info.address.equals(key, ignoreCase = true) }
     }
+
+    /** The single-watch link's calls: what every deprecated per-watch call of this class runs on. */
+    private val one: WatchApi get() = org.avmedia.gshockapi.casio.WatchLink.api
 
     /**
      * Scan for G-Shock devices.
@@ -215,7 +173,7 @@ class GShockAPI(private val context: Context) : IGShockAPI {
 
     override fun isConnectedTo(address: String): Boolean {
         Connection.init(context)
-        return Connection.isConnected() && WatchInfo.getAddress().equals(address, ignoreCase = true)
+        return Connection.isConnected() && one.info.address.equals(address, ignoreCase = true)
     }
 
     /**
@@ -264,11 +222,8 @@ class GShockAPI(private val context: Context) : IGShockAPI {
      */
     /* Do not get value from cache, because we do not want to
     get all values here. */
-    override suspend fun getPressedButton(): IO.WatchButton {
-        val value = ButtonPressedIO.request()
-        ButtonPressedIO.put(value)
-        return value
-    }
+    @Deprecated(SINGLE_WATCH)
+    override suspend fun getPressedButton(): IO.WatchButton = one.getPressedButton()
 
     /**
      * This function tells us if the connection was initiated by short-pressing the lower-right button on the
@@ -276,20 +231,16 @@ class GShockAPI(private val context: Context) : IGShockAPI {
      *
      * @return **true** if the lower-right button initiated the connection, **false** otherwise.
      */
-    override fun isActionButtonPressed(): Boolean {
-        val button = ButtonPressedIO.get()
-        return button == IO.WatchButton.LOWER_RIGHT
-    }
+    @Deprecated(SINGLE_WATCH)
+    override fun isActionButtonPressed(): Boolean = one.isActionButtonPressed()
 
     /**
      * Checks if the connection was initiated by a button press that keeps the watch always connected.
      *
      * @return **true** if the connection was initiated by the "Always Connected" button, **false** otherwise.
      */
-    override fun isAlwaysConnectedConnectionPressed(): Boolean {
-        val button = ButtonPressedIO.get()
-        return button == IO.WatchButton.ALLAYS_CONNECTED_CONNECTION
-    }
+    @Deprecated(SINGLE_WATCH)
+    override fun isAlwaysConnectedConnectionPressed(): Boolean = one.isAlwaysConnectedConnectionPressed()
 
     /**
      * This function tells us if the connection was initiated by long-pressing the lower-left
@@ -297,10 +248,8 @@ class GShockAPI(private val context: Context) : IGShockAPI {
      *
      * @return **true** if the lower-left button initiated the connection, **false** otherwise.
      */
-    override fun isNormalButtonPressed(): Boolean {
-        val button = ButtonPressedIO.get()
-        return button == IO.WatchButton.LOWER_LEFT
-    }
+    @Deprecated(SINGLE_WATCH)
+    override fun isNormalButtonPressed(): Boolean = one.isNormalButtonPressed()
 
     /**
      * This function tells us if the connection was initiated automatically by the watch, without the user
@@ -309,10 +258,8 @@ class GShockAPI(private val context: Context) : IGShockAPI {
      *
      * @return **true** if watch automatically initiated the connection, **false** otherwise.
      */
-    override fun isAutoTimeStarted(): Boolean {
-        val button = ButtonPressedIO.get()
-        return button == IO.WatchButton.NO_BUTTON
-    }
+    @Deprecated(SINGLE_WATCH)
+    override fun isAutoTimeStarted(): Boolean = one.isAutoTimeStarted()
 
     /**
      * This function tells us if the connection was initiated by ling-pressing the lower-right button on the
@@ -320,37 +267,32 @@ class GShockAPI(private val context: Context) : IGShockAPI {
      *
      * @return **true** if button pressed to activate FIND PHONE function, **false** otherwise.
      */
-    override fun isFindPhoneButtonPressed(): Boolean {
-        val button = ButtonPressedIO.get()
-        return button == IO.WatchButton.FIND_PHONE
-    }
+    @Deprecated(SINGLE_WATCH)
+    override fun isFindPhoneButtonPressed(): Boolean = one.isFindPhoneButtonPressed()
 
     /**
      * Get the name of the watch.
      *
      * @return returns the name of the watch as a String. i.e. "GW-B5600"
      */
-    override suspend fun getWatchName(): String {
-        return WatchNameIO.request()
-    }
+    @Deprecated(SINGLE_WATCH)
+    override suspend fun getWatchName(): String = one.getWatchName()
 
     /**
      * Retrieves the last error reported by the watch or the BLE layer.
      *
      * @return Error message string.
      */
-    override suspend fun getError(): String {
-        return ErrorIO.request()
-    }
+    @Deprecated(SINGLE_WATCH)
+    override suspend fun getError(): String = one.getError()
 
     /**
      * Get the DST state of the watch.
      *
      * @return returns the Daylight Saving Time state of the watch as a String.
      */
-    override suspend fun getDSTWatchState(state: IO.DstState): String {
-        return DstWatchStateIO.request(state)
-    }
+    @Deprecated(SINGLE_WATCH)
+    override suspend fun getDSTWatchState(state: IO.DstState): String = one.getDSTWatchState(state)
 
     /**
      * Get the **Daylight Saving Time** for a particular World City set on the watch.
@@ -360,9 +302,8 @@ class GShockAPI(private val context: Context) : IGShockAPI {
      *
      * @return Daylight Saving Time state of the requested World City as a String.
      */
-    override suspend fun getDSTForWorldCities(cityNumber: Int): String {
-        return DstForWorldCitiesIO.request(cityNumber)
-    }
+    @Deprecated(SINGLE_WATCH)
+    override suspend fun getDSTForWorldCities(cityNumber: Int): String = one.getDSTForWorldCities(cityNumber)
 
     /**
      * Get the name for a particular World City set on the watch.
@@ -372,36 +313,32 @@ class GShockAPI(private val context: Context) : IGShockAPI {
      *
      * @return The name of the requested World City as a String.
      */
-    override suspend fun getWorldCities(cityNumber: Int): String {
-        return WorldCitiesIO.request(cityNumber)
-    }
+    @Deprecated(SINGLE_WATCH)
+    override suspend fun getWorldCities(cityNumber: Int): String = one.getWorldCities(cityNumber)
 
     /**
      * Get Home Time, (Home City).
      *
      * @return The name of Home City as a String.
      */
-    override suspend fun getHomeTime(): String {
-        return WatchInfo.protocol.getHomeTime()
-    }
+    @Deprecated(SINGLE_WATCH)
+    override suspend fun getHomeTime(): String = one.getHomeTime()
 
     /**
      * Get Battery level.
      *
      * @return the battery level in percent as a String. E.g.: 83
      */
-    override suspend fun getBatteryLevel(): Int {
-        return WatchInfo.protocol.getBatteryLevel()
-    }
+    @Deprecated(SINGLE_WATCH)
+    override suspend fun getBatteryLevel(): Int = one.getBatteryLevel()
 
     /**
      * Get Watch Temperature.
      *
      * @return the watch's temperature in degree Celsius
      */
-    override suspend fun getWatchTemperature(): Int {
-        return WatchInfo.protocol.getWatchTemperature()
-    }
+    @Deprecated(SINGLE_WATCH)
+    override suspend fun getWatchTemperature(): Int = one.getWatchTemperature()
 
     /**
      * Get the complete step-count life log from the watch (if supported).
@@ -409,9 +346,8 @@ class GShockAPI(private val context: Context) : IGShockAPI {
      * @param peek If true, retrieves history without closing the transaction.
      * @return hourly and daily history plus the current-day total
      */
-    override suspend fun getStepCount(peek: Boolean): StepCounterData {
-        return WatchInfo.protocol.getStepCount(peek)
-    }
+    @Deprecated(SINGLE_WATCH)
+    override suspend fun getStepCount(peek: Boolean): StepCounterData = one.getStepCount(peek)
 
     /**
      * Alias for a quick summary call that returns today's total steps.
@@ -419,27 +355,24 @@ class GShockAPI(private val context: Context) : IGShockAPI {
      * This is a lightweight call intended to return the current-day total
      * without forcing the watch to finish a full history transfer.
      */
-    override suspend fun getStepSummary(): Int {
-        return getStepCount(peek = false).currentDaySteps ?: 0
-    }
+    @Deprecated(SINGLE_WATCH)
+    override suspend fun getStepSummary(): Int = one.getStepSummary()
 
     /**
      * Get Timer value in seconds.
      *
      * @return The timer number in seconds as an Int. E.g.: 180 means the timer is set for 3 minutes.
      */
-    override suspend fun getTimer(): Int {
-        return WatchInfo.protocol.getTimer()
-    }
+    @Deprecated(SINGLE_WATCH)
+    override suspend fun getTimer(): Int = one.getTimer()
 
     /**
      * Set Timer value in seconds.
      *
      * @param timerValue Timer number of seconds as an Int.  E.g.: 180 means the timer will be set for 3 minutes.
      */
-    override fun setTimer(timerValue: Int) {
-        WatchInfo.protocol.setTimer(timerValue)
-    }
+    @Deprecated(SINGLE_WATCH)
+    override fun setTimer(timerValue: Int) = one.setTimer(timerValue)
 
     /**
      * Gets and internally sets app info to the watch.
@@ -448,9 +381,8 @@ class GShockAPI(private val context: Context) : IGShockAPI {
      *
      * @return appInfo string from the watch.
      */
-    override suspend fun getAppInfo(): String {
-        return AppInfoIO.request()
-    }
+    @Deprecated(SINGLE_WATCH)
+    override suspend fun getAppInfo(): String = one.getAppInfo()
 
     /**
      * Writes data to the watch's scratchpad/user data area.
@@ -458,26 +390,16 @@ class GShockAPI(private val context: Context) : IGShockAPI {
      * @param data The byte array to write.
      * @param startIndex The starting index in the scratchpad.
      */
-    override suspend fun setScratchpadData(data: ByteArray) {
-        if (!WatchInfo.hasScratchpad) {
-            Timber.i("setScratchpadData: ${WatchInfo.model} has no scratchpad; not written")
-            return
-        }
-        AppInfoIO.setUserData(data)
-    }
+    @Deprecated(SINGLE_WATCH)
+    override suspend fun setScratchpadData(data: ByteArray) = one.setScratchpadData(data)
 
     /**
      * Reads data from the watch's scratchpad/user data area.
      *
      * @return The retrieved byte array.
      */
-    override suspend fun getScratchpadData(): ByteArray {
-        if (!WatchInfo.hasScratchpad) {
-            return ByteArray(AppInfoIOFunctional.BUFFER_SIZE - AppInfoIOFunctional.USER_DATA_START_INDEX)
-        }
-        AppInfoIO.request()
-        return AppInfoIO.getUserData()
-    }
+    @Deprecated(SINGLE_WATCH)
+    override suspend fun getScratchpadData(): ByteArray = one.getScratchpadData()
 
     /**
      * Checks if the scratchpad data was reset since the last read.
@@ -485,9 +407,8 @@ class GShockAPI(private val context: Context) : IGShockAPI {
      * @return true if scratchpad was reset, or if the watch has no scratchpad, so there is
      * no stored data to decode and defaults should be used.
      */
-    override fun isScratchpadReset(): Boolean {
-        return !WatchInfo.hasScratchpad || AppInfoIO.wasScratchpadReset
-    }
+    @Deprecated(SINGLE_WATCH)
+    override fun isScratchpadReset(): Boolean = one.isScratchpadReset()
 
     /**
      * Sets the current time on the watch from the time on the phone. In addition, it can optionally set the Home Time
@@ -502,20 +423,12 @@ class GShockAPI(private val context: Context) : IGShockAPI {
      *      setTime("Europe/Sofia")
      *  ```
      */
+    @Deprecated(SINGLE_WATCH)
     override suspend fun setTime(
         timeZone: String,
         timeMs: Long?,
         offsetFormSystemTime: Long?,
-    ) {
-        if (!ZoneId.getAvailableZoneIds().contains(timeZone)) {
-            Timber.e("setTime: Invalid timezone $timeZone passed")
-            ProgressEvents.onNext("ApiError")
-            return
-        }
-
-        TimeIO.setTimezone(timeZone)
-        WatchInfo.protocol.setTime(timeMs, offset = offsetFormSystemTime)
-    }
+    ) = one.setTime(timeZone, timeMs, offsetFormSystemTime)
 
     /**
      * Gets the current alarms from the watch. Up to 5 alarms are supported on the watch.
@@ -523,9 +436,8 @@ class GShockAPI(private val context: Context) : IGShockAPI {
      * @return ArrayList<[org.avmedia.gshockapi.model.Alarm]>
      */
 
-    override suspend fun getAlarms(): ArrayList<Alarm> {
-        return WatchInfo.protocol.getAlarms()
-    }
+    @Deprecated(SINGLE_WATCH)
+    override suspend fun getAlarms(): ArrayList<Alarm> = one.getAlarms()
 
     /**
      * Sets alarms to the watch. Up to 5 alarms are supported on the watch.
@@ -533,34 +445,22 @@ class GShockAPI(private val context: Context) : IGShockAPI {
      * @param ArrayList<[Alarm]>
      */
 
-    override fun setAlarms(alarms: ArrayList<Alarm>) {
-        WatchInfo.protocol.setAlarms(alarms)
-    }
+    @Deprecated(SINGLE_WATCH)
+    override fun setAlarms(alarms: ArrayList<Alarm>) = one.setAlarms(alarms)
 
-    override suspend fun getExerciseProfile(): ExerciseProfile {
-        return WatchInfo.protocol.getExerciseProfile()
-    }
+    @Deprecated(SINGLE_WATCH)
+    override suspend fun getExerciseProfile(): ExerciseProfile = one.getExerciseProfile()
 
-    override fun setExerciseProfile(profile: ExerciseProfile) {
-        WatchInfo.protocol.setExerciseProfile(profile)
-    }
+    @Deprecated(SINGLE_WATCH)
+    override fun setExerciseProfile(profile: ExerciseProfile) = one.setExerciseProfile(profile)
 
     /**
      * Gets the current events (reminders) from the watch. Up to 5 events are supported.
      *
      * @return ArrayList<[org.avmedia.gshockapi.model.Event]>
      */
-    override suspend fun getEventsFromWatch(): ArrayList<Event> {
-        val events = ArrayList<Event>()
-
-        events.add(getEventFromWatch(1))
-        events.add(getEventFromWatch(2))
-        events.add(getEventFromWatch(3))
-        events.add(getEventFromWatch(4))
-        events.add(getEventFromWatch(5))
-
-        return events
-    }
+    @Deprecated(SINGLE_WATCH)
+    override suspend fun getEventsFromWatch(): ArrayList<Event> = one.getEventsFromWatch()
 
     /**
      * Gets a single event (reminder) from the watch.
@@ -568,32 +468,24 @@ class GShockAPI(private val context: Context) : IGShockAPI {
      * @param eventNumber The index of the event 1..5
      * @return [Event]
      */
-    override suspend fun getEventFromWatch(eventNumber: Int): Event {
-        return EventsIO.request(eventNumber)
-    }
+    @Deprecated(SINGLE_WATCH)
+    override suspend fun getEventFromWatch(eventNumber: Int): Event = one.getEventFromWatch(eventNumber)
 
     /**
      * Sets events (reminders) to the watch. Up to 5 events are supported.
      *
      * @param ArrayList<[Event]>
      */
-    override fun setEvents(events: ArrayList<Event>) {
-        if (!WatchInfo.hasReminders) {
-            Timber.i("setEvents: ${WatchInfo.model} has no reminders; not written")
-            return
-        }
-        EventsIO.set(events)
-    }
+    @Deprecated(SINGLE_WATCH)
+    override fun setEvents(events: ArrayList<Event>) = one.setEvents(events)
 
     /**
      * Clears all  events (reminders) from the watch. Up to 5 events are supported.
      *
      * @param none
      */
-    override fun clearEvents() {
-        if (!WatchInfo.hasReminders) return
-        EventsIO.clearAll()
-    }
+    @Deprecated(SINGLE_WATCH)
+    override fun clearEvents() = one.clearEvents()
 
     /**
      * Get settings from the watch. Example:
@@ -607,35 +499,36 @@ class GShockAPI(private val context: Context) : IGShockAPI {
      * @return [org.avmedia.gshockapi.model.Settings]
      */
 
-    override suspend fun getWatchFaceItem(): WatchFaceItem? = H5600SettingsIO.getWatchFaceItem()
+    @Deprecated(SINGLE_WATCH)
+    override suspend fun getWatchFaceItem(): WatchFaceItem? = one.getWatchFaceItem()
 
-    override suspend fun setWatchFaceItem(item: WatchFaceItem): WatchFaceItem? = H5600SettingsIO.setWatchFaceItem(item)
+    @Deprecated(SINGLE_WATCH)
+    override suspend fun setWatchFaceItem(item: WatchFaceItem): WatchFaceItem? = one.setWatchFaceItem(item)
 
-    override suspend fun getH5600WatchFaceNumber(): Int? = H5600SettingsIO.getWatchFaceNumber()
+    @Deprecated(SINGLE_WATCH)
+    override suspend fun getH5600WatchFaceNumber(): Int? = one.getH5600WatchFaceNumber()
 
-    override suspend fun setH5600WatchFaceNumber(face: Int) = H5600SettingsIO.setWatchFaceNumber(face)
+    @Deprecated(SINGLE_WATCH)
+    override suspend fun setH5600WatchFaceNumber(face: Int) = one.setH5600WatchFaceNumber(face)
 
-    override suspend fun getSettings(): Settings {
-        return WatchInfo.protocol.getSettings()
-    }
+    @Deprecated(SINGLE_WATCH)
+    override suspend fun getSettings(): Settings = one.getSettings()
 
     /**
      * Retrieves the basic settings (date format, language, button tones, etc.) from the watch.
      *
      * @return A [Settings] object containing basic configuration.
      */
-    override suspend fun getBasicSettings(): Settings {
-        return WatchInfo.protocol.getBasicSettings()
-    }
+    @Deprecated(SINGLE_WATCH)
+    override suspend fun getBasicSettings(): Settings = one.getBasicSettings()
 
     /**
      * Retrieves time adjustment (Auto-Time) configuration from the watch.
      *
      * @return A [TimeAdjustmentInfo] object.
      */
-    override suspend fun getTimeAdjustment(): TimeAdjustmentInfo {
-        return WatchInfo.protocol.getTimeAdjustment()
-    }
+    @Deprecated(SINGLE_WATCH)
+    override suspend fun getTimeAdjustment(): TimeAdjustmentInfo = one.getTimeAdjustment()
 
     /**
      * Sends a notification to the watch display.
@@ -664,26 +557,20 @@ class GShockAPI(private val context: Context) : IGShockAPI {
      * @param notification AppNotification object containing all notification details
      * @see AppNotification for notification object structure
      * @see NotificationType for supported notification types */
-    override fun sendAppNotification(notification: AppNotification) {
-        queueAppNotification(notification)
-    }
+    @Deprecated(SINGLE_WATCH)
+    override fun sendAppNotification(notification: AppNotification) = one.sendAppNotification(notification)
 
+    @Deprecated(SINGLE_WATCH)
     override suspend fun sendAppNotificationAndWait(notification: AppNotification): org.avmedia.gshockapi.casio.NotificationSender.Outcome =
-        queueAppNotification(notification).await()
-
-    private fun queueAppNotification(notification: AppNotification): kotlinx.coroutines.Deferred<org.avmedia.gshockapi.casio.NotificationSender.Outcome> {
-        val encodedBuffer = AppNotificationIO.encodeNotificationPacket(NotificationIds.assign(notification))
-        val encryptedBuffer = AppNotificationIO.xorEncodeBuffer(encodedBuffer)
-        org.avmedia.gshockapi.casio.NotificationSender.spacingMs = if (WatchInfo.protocol === org.avmedia.gshockapi.protocols.H5600Protocol) 2_000L else 500L
-        return org.avmedia.gshockapi.casio.NotificationSender.send(encryptedBuffer)
-    }
+        one.sendAppNotificationAndWait(notification)
 
     /**
      * Checks if the connected watch supports receiving app notifications.
      *
      * @return true if the notification service is supported.
      */
-    override fun supportsAppNotifications(): Boolean = WatchInfo.showsAppNotificationsNow(Connection.serviceFound(GetSetMode.NOTIFY))
+    @Deprecated(SINGLE_WATCH)
+    override fun supportsAppNotifications(): Boolean = one.supportsAppNotifications()
 
     /**
      * Set settings to the watch. Populate a [Settings] and call this function. Example:
@@ -697,9 +584,8 @@ class GShockAPI(private val context: Context) : IGShockAPI {
      *
      * @param settings
      */
-    override fun setSettings(settings: Settings) {
-        WatchInfo.protocol.setSettings(settings)
-    }
+    @Deprecated(SINGLE_WATCH)
+    override fun setSettings(settings: Settings) = one.setSettings(settings)
 
     /**
      * Get the Bluetooth ID of the connected watch
@@ -738,16 +624,14 @@ class GShockAPI(private val context: Context) : IGShockAPI {
      * @param message The JSON message string.
      */
     @RequiresApi(Build.VERSION_CODES.O)
-    override fun sendMessage(message: String) {
-        MessageDispatcher.sendToWatch(message)
-    }
+    @Deprecated(SINGLE_WATCH)
+    override fun sendMessage(message: String) = one.sendMessage(message)
 
     /**
      * Resets the hand position of the watch.
      */
-    override fun resetHand() {
-        sendMessage("{action: \"RESET_HAND\", value: \"\"}")
-    }
+    @Deprecated(SINGLE_WATCH)
+    override fun resetHand() = one.resetHand()
 
     /**
      * Validates a Bluetooth MAC address.

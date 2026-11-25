@@ -2,18 +2,10 @@ package org.avmedia.gshockapi.protocols
 
 import android.os.Build
 import androidx.annotation.RequiresApi
-import org.avmedia.gshockapi.WatchInfo
-import org.avmedia.gshockapi.io.AlarmsIO
 import org.avmedia.gshockapi.io.ExerciseIO
 import org.avmedia.gshockapi.io.HomeTimeIOFunctional
-import org.avmedia.gshockapi.io.SettingsIO
-import org.avmedia.gshockapi.io.StepCounterIO
-import org.avmedia.gshockapi.io.TimeAdjustmentIO
 import org.avmedia.gshockapi.io.TimeAdjustmentInfo
-import org.avmedia.gshockapi.io.TimeIO
-import org.avmedia.gshockapi.io.TimerIO
-import org.avmedia.gshockapi.io.WatchConditionIO
-import org.avmedia.gshockapi.io.WorldCitiesIO
+import org.avmedia.gshockapi.link.WatchLink
 import org.avmedia.gshockapi.model.Alarm
 import org.avmedia.gshockapi.model.ExerciseProfile
 import org.avmedia.gshockapi.model.Settings
@@ -40,25 +32,26 @@ open class StandardProtocol : WatchProtocol {
     }
 
     override suspend fun setTime(
+        link: WatchLink,
         timeMs: Long?,
         offset: Long?,
     ) {
-        // TimeIO owns the complete setup sequence and tailors it to the
+        // The link's time owns the complete setup sequence and tailors it to the
         // connected model.  Performing setup here as well used to force a
         // world-city (0x1f) transaction for watches such as the ABL-100WE,
         // which do not implement that register.  The watch replies with
         // FF 81 1F and the actual current-time command never follows.
-        TimeIO.set(timeMs, offset)
+        link.time.set(timeMs, offset)
     }
 
-    override suspend fun getStepCount(peek: Boolean): StepCounterData = StepCounterIO.request(peek)
+    override suspend fun getStepCount(link: WatchLink, peek: Boolean): StepCounterData = link.io.stepCounter.request(peek)
 
-    override suspend fun getTimer(): Int {
-        return TimerIO.request(getTimerRequest())
+    override suspend fun getTimer(link: WatchLink): Int {
+        return link.io.timer.request(getTimerRequest())
     }
 
-    override fun setTimer(timerValue: Int) {
-        TimerIO.set(timerValue)
+    override fun setTimer(link: WatchLink, timerValue: Int) {
+        link.io.timer.set(timerValue)
     }
 
     override fun getTimerRequest(): String {
@@ -69,54 +62,57 @@ open class StandardProtocol : WatchProtocol {
         return 7
     }
 
-    override suspend fun getHomeTime(): String {
-        val raw = WorldCitiesIO.request(0)
+    override suspend fun getHomeTime(link: WatchLink): String {
+        val raw = link.time.requestWorldCities(0)
         return HomeTimeIOFunctional.parseHomeCity(raw, 2)
     }
 
-    override suspend fun getBatteryLevel(): Int {
-        return WatchConditionIO.request(getWatchConditionRequest()).batteryLevel
+    override suspend fun getBatteryLevel(link: WatchLink): Int {
+        return link.io.status.requestCondition(getWatchConditionRequest()).batteryLevel
     }
 
-    override suspend fun getWatchTemperature(): Int {
-        return WatchConditionIO.request(getWatchConditionRequest()).temperature
+    override suspend fun getWatchTemperature(link: WatchLink): Int {
+        return link.io.status.requestCondition(getWatchConditionRequest()).temperature
     }
 
-    override suspend fun getAlarms(): ArrayList<Alarm> {
-        return AlarmsIO.request()
+    override suspend fun getAlarms(link: WatchLink): ArrayList<Alarm> {
+        return link.io.alarms.request()
     }
 
-    override fun setAlarms(alarms: ArrayList<Alarm>) {
-        AlarmsIO.set(alarms)
+    override fun setAlarms(link: WatchLink, alarms: ArrayList<Alarm>) {
+        link.io.alarms.set(alarms)
     }
 
-    override suspend fun getExerciseProfile(): ExerciseProfile {
+    /** The exercise profile has only its single-watch adapter ([ExerciseIO]) so far. */
+    override suspend fun getExerciseProfile(link: WatchLink): ExerciseProfile {
+        singleWatchOnly(link, "The exercise profile")
         return ExerciseIO.request()
     }
 
-    override fun setExerciseProfile(profile: ExerciseProfile) {
+    override fun setExerciseProfile(link: WatchLink, profile: ExerciseProfile) {
+        singleWatchOnly(link, "The exercise profile")
         ExerciseIO.set(profile)
     }
 
-    override suspend fun getSettings(): Settings {
+    override suspend fun getSettings(link: WatchLink): Settings {
         // Basic watch settings (0x13) only exist on watches that have them.
-        val settings = if (WatchInfo.hasWatchSettings) SettingsIO.request() else Settings()
-        val timeAdjustment = TimeAdjustmentIO.request()
+        val settings = getBasicSettings(link)
+        val timeAdjustment = link.io.timeAdjustment.request()
         settings.timeAdjustment = timeAdjustment.isTimeAdjustmentSet
         settings.adjustmentTimeMinutes = timeAdjustment.adjustmentTimeMinutes
         return settings
     }
 
-    override fun setSettings(settings: Settings) {
-        if (WatchInfo.hasWatchSettings) SettingsIO.set(settings)
-        TimeAdjustmentIO.set(settings)
+    override fun setSettings(link: WatchLink, settings: Settings) {
+        if (link.watchInfo.info.hasWatchSettings) link.io.settings.set(settings)
+        link.io.timeAdjustment.set(settings)
     }
 
-    override suspend fun getBasicSettings(): Settings {
-        return if (WatchInfo.hasWatchSettings) SettingsIO.request() else Settings()
+    override suspend fun getBasicSettings(link: WatchLink): Settings {
+        return if (link.watchInfo.info.hasWatchSettings) link.io.settings.request() else Settings()
     }
 
-    override suspend fun getTimeAdjustment(): TimeAdjustmentInfo {
-        return TimeAdjustmentIO.request()
+    override suspend fun getTimeAdjustment(link: WatchLink): TimeAdjustmentInfo {
+        return link.io.timeAdjustment.request()
     }
 }

@@ -2,7 +2,6 @@ package org.avmedia.gshockapi.io
 
 import android.os.Build
 import androidx.annotation.RequiresApi
-import org.avmedia.gshockapi.WatchInfo
 import org.avmedia.gshockapi.utils.Utils
 
 // ============================================================================
@@ -42,9 +41,8 @@ object HomeTimeIOFunctional {
  */
 @RequiresApi(Build.VERSION_CODES.O)
 object HomeTimeIO {
-    suspend fun request(): String {
-        return WatchInfo.protocol.getHomeTime()
-    }
+    /** The home city of the one link's watch, read the way its own model's protocol reads it. */
+    suspend fun request(): String = org.avmedia.gshockapi.casio.WatchLink.api.getHomeTime()
 
     suspend fun requestRaw(slot: Int): String = org.avmedia.gshockapi.casio.WatchLink.time.requestHomeTime(slot)
 

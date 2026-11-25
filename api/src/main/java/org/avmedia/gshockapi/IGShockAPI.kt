@@ -19,7 +19,19 @@ import java.util.TimeZone
  * This interface defines all available operations for device discovery, connection management,
  * and watch feature interaction (time, alarms, reminders, settings, etc.).
  */
+/**
+ * The message of the deprecated single-watch calls: they run on the one single-watch link. New code names its watch:
+ * `watch(key)` gives that watch's [WatchApi].
+ */
+internal const val SINGLE_WATCH = "Single-watch call: use watch(key) and that watch's WatchApi"
+
 interface IGShockAPI {
+    /**
+     * The calls on the watch of [key]: settings, alarms, time, health and workout reads, notifications, tide, condition,
+     * name, ... all run on that watch's own link. Null when no watch of that key is known.
+     */
+    fun watch(key: String): WatchApi? = null
+
     /**
      * This function waits for the watch to connect to the phone.
      * When connected, it returns and emits a `ConnectionSetupComplete` event.
@@ -35,6 +47,7 @@ interface IGShockAPI {
      *
      * @return true if initialization was successful.
      */
+    @Deprecated(SINGLE_WATCH)
     suspend fun init(): Boolean
 
     /**
@@ -56,6 +69,7 @@ interface IGShockAPI {
      *
      * @return The watch button type (LOWER_LEFT, LOWER_RIGHT, NO_BUTTON, etc.).
      */
+    @Deprecated(SINGLE_WATCH)
     suspend fun getPressedButton(): IO.WatchButton
 
     /**
@@ -63,6 +77,7 @@ interface IGShockAPI {
      *
      * @return true if the action button was pressed.
      */
+    @Deprecated(SINGLE_WATCH)
     fun isActionButtonPressed(): Boolean
 
     /**
@@ -70,6 +85,7 @@ interface IGShockAPI {
      *
      * @return true if always-connected pattern was used.
      */
+    @Deprecated(SINGLE_WATCH)
     fun isAlwaysConnectedConnectionPressed(): Boolean
 
     /**
@@ -77,6 +93,7 @@ interface IGShockAPI {
      *
      * @return true if the normal connection button was pressed.
      */
+    @Deprecated(SINGLE_WATCH)
     fun isNormalButtonPressed(): Boolean
 
     /**
@@ -84,6 +101,7 @@ interface IGShockAPI {
      *
      * @return true if this is an automated periodic connection.
      */
+    @Deprecated(SINGLE_WATCH)
     fun isAutoTimeStarted(): Boolean
 
     /**
@@ -91,6 +109,7 @@ interface IGShockAPI {
      *
      * @return true if find-phone button was pressed.
      */
+    @Deprecated(SINGLE_WATCH)
     fun isFindPhoneButtonPressed(): Boolean
 
     /**
@@ -98,6 +117,7 @@ interface IGShockAPI {
      *
      * @return The model name as reported by the watch.
      */
+    @Deprecated(SINGLE_WATCH)
     suspend fun getWatchName(): String
 
     /**
@@ -105,6 +125,7 @@ interface IGShockAPI {
      *
      * @return Error message string.
      */
+    @Deprecated(SINGLE_WATCH)
     suspend fun getError(): String
 
     /**
@@ -113,6 +134,7 @@ interface IGShockAPI {
      * @param state The DST state type to query (ZERO, TWO, FOUR).
      * @return The DST state as a string.
      */
+    @Deprecated(SINGLE_WATCH)
     suspend fun getDSTWatchState(state: IO.DstState): String
 
     /**
@@ -121,6 +143,7 @@ interface IGShockAPI {
      * @param cityNumber The index of the world city (0 to 5).
      * @return The DST state for the requested city.
      */
+    @Deprecated(SINGLE_WATCH)
     suspend fun getDSTForWorldCities(cityNumber: Int): String
 
     /**
@@ -129,6 +152,7 @@ interface IGShockAPI {
      * @param cityNumber The index of the world city (0 to 5).
      * @return The name of the world city.
      */
+    @Deprecated(SINGLE_WATCH)
     suspend fun getWorldCities(cityNumber: Int): String
 
     /**
@@ -136,6 +160,7 @@ interface IGShockAPI {
      *
      * @return The name of the home city.
      */
+    @Deprecated(SINGLE_WATCH)
     suspend fun getHomeTime(): String
 
     /**
@@ -143,6 +168,7 @@ interface IGShockAPI {
      *
      * @return Battery percentage (0 to 100).
      */
+    @Deprecated(SINGLE_WATCH)
     suspend fun getBatteryLevel(): Int
 
     /**
@@ -150,6 +176,7 @@ interface IGShockAPI {
      *
      * @return Temperature in degrees Celsius.
      */
+    @Deprecated(SINGLE_WATCH)
     suspend fun getWatchTemperature(): Int
 
     /**
@@ -159,6 +186,7 @@ interface IGShockAPI {
      * @param peek If true, retrieves history without closing the transaction.
      * @return Hourly and daily history plus the current-day total.
      */
+    @Deprecated(SINGLE_WATCH)
     suspend fun getStepCount(peek: Boolean = true): StepCounterData
 
     /**
@@ -166,6 +194,7 @@ interface IGShockAPI {
      * This is a lightweight call intended to return the current-day total
      * without forcing the watch to finish a full history transfer.
      */
+    @Deprecated(SINGLE_WATCH)
     suspend fun getStepSummary(): Int
 
     /**
@@ -173,6 +202,7 @@ interface IGShockAPI {
      *
      * @return Timer value in seconds.
      */
+    @Deprecated(SINGLE_WATCH)
     suspend fun getTimer(): Int
 
     /**
@@ -180,6 +210,7 @@ interface IGShockAPI {
      *
      * @param timerValue The timer duration in seconds.
      */
+    @Deprecated(SINGLE_WATCH)
     fun setTimer(timerValue: Int)
 
     /**
@@ -187,6 +218,7 @@ interface IGShockAPI {
      *
      * @return App info string.
      */
+    @Deprecated(SINGLE_WATCH)
     suspend fun getAppInfo(): String
 
     /**
@@ -195,6 +227,7 @@ interface IGShockAPI {
      * @param timeZone The target timezone ID (e.g., "Europe/Sofia"). Defaults to phone's current timezone.
      * @param timeMs Optional timestamp in milliseconds to set. Defaults to current time.
      */
+    @Deprecated(SINGLE_WATCH)
     suspend fun setTime(
         timeZone: String = TimeZone.getDefault().id,
         timeMs: Long? = null,
@@ -206,6 +239,7 @@ interface IGShockAPI {
      *
      * @return An ArrayList of [org.avmedia.gshockapi.model.Alarm] objects.
      */
+    @Deprecated(SINGLE_WATCH)
     suspend fun getAlarms(): ArrayList<Alarm>
 
     /**
@@ -213,16 +247,19 @@ interface IGShockAPI {
      *
      * @param alarms The list of 5 alarms to set.
      */
+    @Deprecated(SINGLE_WATCH)
     fun setAlarms(alarms: ArrayList<Alarm>)
 
     /**
      * Retrieves the exercise profile from the watch.
      */
+    @Deprecated(SINGLE_WATCH)
     suspend fun getExerciseProfile(): ExerciseProfile
 
     /**
      * Updates the exercise profile on the watch.
      */
+    @Deprecated(SINGLE_WATCH)
     fun setExerciseProfile(profile: ExerciseProfile)
 
     /**
@@ -230,6 +267,7 @@ interface IGShockAPI {
      *
      * @return An ArrayList of [org.avmedia.gshockapi.model.Event] objects.
      */
+    @Deprecated(SINGLE_WATCH)
     suspend fun getEventsFromWatch(): ArrayList<Event>
 
     /**
@@ -238,6 +276,7 @@ interface IGShockAPI {
      * @param eventNumber The event index (1 to 5).
      * @return The requested [Event].
      */
+    @Deprecated(SINGLE_WATCH)
     suspend fun getEventFromWatch(eventNumber: Int): Event
 
     /**
@@ -245,11 +284,13 @@ interface IGShockAPI {
      *
      * @param events The list of 5 events to set.
      */
+    @Deprecated(SINGLE_WATCH)
     fun setEvents(events: ArrayList<Event>)
 
     /**
      * Clears all events (reminders) from the watch.
      */
+    @Deprecated(SINGLE_WATCH)
     fun clearEvents()
 
     /**
@@ -257,11 +298,16 @@ interface IGShockAPI {
      *
      * @return A [org.avmedia.gshockapi.model.Settings] object.
      */
+    @Deprecated(SINGLE_WATCH)
     suspend fun getWatchFaceItem(): org.avmedia.gshockapi.model.WatchFaceItem? = null
+    @Deprecated(SINGLE_WATCH)
     suspend fun setWatchFaceItem(item: org.avmedia.gshockapi.model.WatchFaceItem): org.avmedia.gshockapi.model.WatchFaceItem? = null
+    @Deprecated(SINGLE_WATCH)
     suspend fun getH5600WatchFaceNumber(): Int? = null
+    @Deprecated(SINGLE_WATCH)
     suspend fun setH5600WatchFaceNumber(face: Int) {}
 
+    @Deprecated(SINGLE_WATCH)
     suspend fun getSettings(): Settings
 
     /**
@@ -269,6 +315,7 @@ interface IGShockAPI {
      *
      * @return A [Settings] object containing basic configuration.
      */
+    @Deprecated(SINGLE_WATCH)
     suspend fun getBasicSettings(): Settings
 
     /**
@@ -276,6 +323,7 @@ interface IGShockAPI {
      *
      * @return A [TimeAdjustmentInfo] object.
      */
+    @Deprecated(SINGLE_WATCH)
     suspend fun getTimeAdjustment(): TimeAdjustmentInfo
 
     /**
@@ -283,6 +331,7 @@ interface IGShockAPI {
      *
      * @param settings The [Settings] object containing the new configuration.
      */
+    @Deprecated(SINGLE_WATCH)
     fun setSettings(settings: Settings)
 
     /**
@@ -308,9 +357,11 @@ interface IGShockAPI {
      *
      * @param notification The [AppNotification] object to send.
      */
+    @Deprecated(SINGLE_WATCH)
     fun sendAppNotification(notification: AppNotification)
 
     /** Like [sendAppNotification], and waits for how the text ended: only SENT means it reached the watch. */
+    @Deprecated(SINGLE_WATCH)
     suspend fun sendAppNotificationAndWait(notification: AppNotification): org.avmedia.gshockapi.casio.NotificationSender.Outcome
 
     /**
@@ -319,6 +370,7 @@ interface IGShockAPI {
      *
      * @return true if the notification service is supported.
      */
+    @Deprecated(SINGLE_WATCH)
     fun supportsAppNotifications(): Boolean
 
     /**
@@ -326,6 +378,7 @@ interface IGShockAPI {
      *
      * @param data The byte array to write.
      */
+    @Deprecated(SINGLE_WATCH)
     suspend fun setScratchpadData(data: ByteArray)
 
     /**
@@ -334,11 +387,13 @@ interface IGShockAPI {
      * @param message The JSON message string.
      */
     @RequiresApi(Build.VERSION_CODES.O)
+    @Deprecated(SINGLE_WATCH)
     fun sendMessage(message: String)
 
     /**
      * Resets the watch hands to their home position.
      */
+    @Deprecated(SINGLE_WATCH)
     fun resetHand()
 
     /**
@@ -361,6 +416,7 @@ interface IGShockAPI {
      *
      * @return The retrieved byte array.
      */
+    @Deprecated(SINGLE_WATCH)
     suspend fun getScratchpadData(): ByteArray
 
     /**
@@ -368,6 +424,7 @@ interface IGShockAPI {
      *
      * @return true if scratchpad was reset.
      */
+    @Deprecated(SINGLE_WATCH)
     fun isScratchpadReset(): Boolean
 
     /**

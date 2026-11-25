@@ -2,11 +2,9 @@ package org.avmedia.gshockapi.protocols
 
 import android.os.Build
 import androidx.annotation.RequiresApi
-import org.avmedia.gshockapi.WatchInfo
-import org.avmedia.gshockapi.io.HomeTimeIO
 import org.avmedia.gshockapi.io.HomeTimeIOFunctional
 import org.avmedia.gshockapi.io.MtgB1000TimeIO
-import org.avmedia.gshockapi.io.TimeIO
+import org.avmedia.gshockapi.link.WatchLink
 import org.avmedia.gshockapi.utils.Utils
 
 @RequiresApi(Build.VERSION_CODES.O)
@@ -52,17 +50,20 @@ object AnalogueProtocol : StandardProtocol() {
     }
 
     override suspend fun setTime(
+        link: WatchLink,
         timeMs: Long?,
         offset: Long?,
     ) {
-        TimeIO.apply {
+        link.time.apply {
             writeDST()
             writeDSTForWorldCities()
             writeHomeTimes()
             set(timeMs)
         }
 
-        if (WatchInfo.hasSecondDial) {
+        if (link.watchInfo.info.hasSecondDial) {
+            // The MTG-B1000 second dial has only its single-watch adapter so far.
+            singleWatchOnly(link, "The second dial")
             MtgB1000TimeIO.setSecondDial()
         }
     }
@@ -75,8 +76,8 @@ object AnalogueProtocol : StandardProtocol() {
         return 15
     }
 
-    override suspend fun getHomeTime(): String {
-        val raw = HomeTimeIO.requestRaw(0)
+    override suspend fun getHomeTime(link: WatchLink): String {
+        val raw = link.time.requestHomeTime(0)
         return HomeTimeIOFunctional.parseHomeCity(raw, 4)
     }
 }

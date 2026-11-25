@@ -9,6 +9,7 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.flow.StateFlow
 import org.avmedia.gshockapi.LinkWatchInfo
+import org.avmedia.gshockapi.WatchApi
 import org.avmedia.gshockapi.ble.GetSetMode
 import org.avmedia.gshockapi.casio.ConnectionContext
 import org.avmedia.gshockapi.casio.ConnectionKeepAlive
@@ -34,6 +35,9 @@ interface LinkGatt : WatchTransport {
 
     /** Turns notifications on for [characteristic]; returns when the descriptor write result came, false when it failed. */
     suspend fun subscribe(characteristic: UUID): Boolean = true
+
+    /** Whether this connection has the service of [handle]: null while its services are not known (or a fake does not say). */
+    fun serviceFound(handle: GetSetMode): Boolean? = null
 }
 
 /**
@@ -89,6 +93,9 @@ class WatchLink internal constructor(
 
     /** Where this link's watch's notifications go: to this link's own objects. */
     val dispatcher: LinkDispatcher = LinkDispatcher(this)
+
+    /** The public calls on this watch (settings, alarms, time, health and workout reads, texts, tide, ...): all on this link. */
+    val api: WatchApi by lazy { WatchApi(this) }
 
     init {
         connection.setup.busy = { transfers.busy }
@@ -180,6 +187,9 @@ class WatchLinks(private val scope: CoroutineScope = CoroutineScope(SupervisorJo
     }
 
     operator fun get(key: String): WatchLink? = links[key]
+
+    /** The public calls on the watch of [key], null when no link of that key is open. */
+    fun api(key: String): WatchApi? = links[key]?.api
 
     fun all(): List<WatchLink> = links.values.toList()
 

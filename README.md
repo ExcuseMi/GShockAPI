@@ -36,6 +36,18 @@ The API documentation can be found [here](https://izivkov.github.io/GShockAPI/ap
 
 To add support for a new watch, see [Adding support for a new watch](docs/ADDING_A_WATCH.md).
 
+### One API per watch
+
+Each watch has its own link (`WatchLinks`) and its own calls: `api.watch(key)` or `links.api(key)` gives a `WatchApi`
+whose settings, alarms, time, health and workout reads, notifications, tide, condition and name calls run on that
+watch only. The `GShockAPI` calls without a key are deprecated single-watch wrappers over the one link.
+
+| Multi-link now | Single-watch link only (for now) |
+|---|---|
+| DW-H5600 family (and the standard reads and writes of every model) | GW-B5600 and MTG-B1000 time code, Oceanus time sync and pairing, exercise profile, run actions |
+
+A single-watch-only step called on another link throws `UnsupportedOperationException`.
+
 ## Dependency
 
 Add the following to your **build.gradle** file:

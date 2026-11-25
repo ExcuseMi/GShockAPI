@@ -105,7 +105,7 @@ class LinkSourceCheckTest {
         only(
             "the single-watch connection context",
             Regex("""\bWatchLink\.connection\b"""),
-            setOf("GShockAPI.kt"),
+            emptySet(),
         )
 
     /** The per-link transfer and notification code reaches nothing of the single-watch adapter: only its own link. */
@@ -259,7 +259,7 @@ class LinkSourceCheckTest {
     @Test fun aLinksMessagesAndProtocolAreItsOwn() {
         val message = sources().single { it.name == "MessageDispatcher.kt" }.readText()
         Regex("""\b(AlarmsIO|EventsIO|SettingsIO|TimeAdjustmentIO|TimerIO|TimeIO)\b""").find(message)?.let { fail("MessageDispatcher sends by itself: ${it.value}") }
-        only("the global model's protocol picked for a frame", Regex("""\bWatchInfo\.protocol\b"""), setOf("GShockAPI.kt", "HomeTimeIO.kt", "CommandSpec.kt"))
+        only("the global model's protocol picked for a frame", Regex("""\bWatchInfo\.protocol\b"""), setOf("CommandSpec.kt"))
         val dispatcher = sources().single { it.name == "LinkDispatcher.kt" }.readText()
         assertTrue("a link's frames use its own model's protocol", dispatcher.contains("protocol: WatchProtocol = link.watchInfo.info.protocol"))
     }

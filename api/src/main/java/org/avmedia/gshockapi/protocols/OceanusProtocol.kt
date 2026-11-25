@@ -7,9 +7,7 @@ import kotlinx.coroutines.withTimeoutOrNull
 import org.avmedia.gshockapi.ble.Connection
 import org.avmedia.gshockapi.ble.GetSetMode
 import org.avmedia.gshockapi.casio.CasioTimeZoneHelper
-import org.avmedia.gshockapi.io.ButtonPressedIO
 import org.avmedia.gshockapi.io.TimeAdjustmentIO
-import org.avmedia.gshockapi.io.TimeIO
 import org.avmedia.gshockapi.link.WatchLink
 import org.avmedia.gshockapi.model.Alarm
 import org.avmedia.gshockapi.model.ExerciseProfile
@@ -53,17 +51,20 @@ object OceanusProtocol : StandardProtocol() {
                     },
                 )
 
+    /** The Oceanus script has only its single-watch adapter ([OceanusIO]) so far. */
     override suspend fun setTime(
+        link: WatchLink,
         timeMs: Long?,
         offset: Long?,
     ) {
-        val kind = ButtonPressedIO.getConnectionKind()
+        val kind = link.button.getConnectionKind()
         if (kind !in OceanusTimeSync.TIME_SYNC_KINDS) {
             Timber.w("OceanusProtocol: not setting time on connection kind $kind")
             return
         }
 
-        val casioTimeZone = TimeIO.getCasioTimezone()
+        singleWatchOnly(link, "The Oceanus time sync")
+        val casioTimeZone = link.time.casioTimezone
         val zoneId = casioTimeZone.zoneId
         val homeZone = OceanusTimeSync.homeZone(zoneId, casioTimeZone.dstRules, Instant.now())
         OceanusTimeSync.run(OceanusIO, homeZone) {
@@ -76,8 +77,9 @@ object OceanusProtocol : StandardProtocol() {
      * On a pairing connection (kind 0: the watch was unpaired and (A) held 2.5 s), writes
      * app information and BLE settings as the official app does, then sets the time.
      */
-    override suspend fun onInitialized() {
-        if (ButtonPressedIO.getConnectionKind() != OceanusTimeSync.PAIRING_KIND) return
+    override suspend fun onInitialized(link: WatchLink) {
+        if (link.button.getConnectionKind() != OceanusTimeSync.PAIRING_KIND) return
+        singleWatchOnly(link, "The Oceanus pairing")
         val zoneId = ZoneId.systemDefault()
         val rule = CasioTimeZoneHelper.findTimeZone(zoneId.id).dstRules
         runCatching {
@@ -92,28 +94,28 @@ object OceanusProtocol : StandardProtocol() {
      * BLE settings (auto-sync on/off) are only written on the connection the official app
      * writes them on: (A) held 2.5 s, app open.
      */
-    override fun setSettings(settings: Settings) {
-        val kind = ButtonPressedIO.getConnectionKind()
+    override fun setSettings(link: WatchLink, settings: Settings) {
+        val kind = link.button.getConnectionKind()
         if (kind != OceanusTimeSync.SETTINGS_KIND) {
             Timber.w("OceanusProtocol: not writing settings on connection kind $kind")
             return
         }
-        super.setSettings(settings)
+        super.setSettings(link, settings)
     }
 
-    override suspend fun getTimer(): Int = 0
+    override suspend fun getTimer(link: WatchLink): Int = 0
 
-    override fun setTimer(timerValue: Int) = Unit
+    override fun setTimer(link: WatchLink, timerValue: Int) = Unit
 
-    override suspend fun getHomeTime(): String = ""
+    override suspend fun getHomeTime(link: WatchLink): String = ""
 
-    override suspend fun getAlarms(): ArrayList<Alarm> = ArrayList()
+    override suspend fun getAlarms(link: WatchLink): ArrayList<Alarm> = ArrayList()
 
-    override fun setAlarms(alarms: ArrayList<Alarm>) = Unit
+    override fun setAlarms(link: WatchLink, alarms: ArrayList<Alarm>) = Unit
 
-    override suspend fun getExerciseProfile(): ExerciseProfile = ExerciseProfile()
+    override suspend fun getExerciseProfile(link: WatchLink): ExerciseProfile = ExerciseProfile()
 
-    override fun setExerciseProfile(profile: ExerciseProfile) = Unit
+    override fun setExerciseProfile(link: WatchLink, profile: ExerciseProfile) = Unit
 }
 
 /** The reads and writes the time-sync script needs. */

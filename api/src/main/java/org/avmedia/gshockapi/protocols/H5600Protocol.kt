@@ -5,7 +5,6 @@ import androidx.annotation.RequiresApi
 import org.avmedia.gshockapi.casio.CasioConstants
 import org.avmedia.gshockapi.casio.ConnectionKeepAlive
 import org.avmedia.gshockapi.io.H5600Channel
-import org.avmedia.gshockapi.io.H5600HealthIO
 import org.avmedia.gshockapi.io.H5600LifeLogReader
 import org.avmedia.gshockapi.io.H5600WorkoutReader
 import org.avmedia.gshockapi.link.WatchLink
@@ -47,7 +46,7 @@ object H5600Protocol : StandardProtocol() {
         return if (channel == H5600Channel.STATUS && !transfers.lifeLog.isAwaitingSetupReply()) first else channel.key
     }
 
-    override suspend fun getStepCount(peek: Boolean): StepCounterData = H5600HealthIO.request(peek)
+    override suspend fun getStepCount(link: WatchLink, peek: Boolean): StepCounterData = link.transfers.lifeLog.request(peek)
 
     override val dataReceivedHandlers: Map<Int, (String) -> Unit>
         get() = super.dataReceivedHandlers - CasioConstants.CHARACTERISTICS.CASIO_ACTIVITY_RECORD.code

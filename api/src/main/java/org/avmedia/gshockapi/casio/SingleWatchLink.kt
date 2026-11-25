@@ -58,6 +58,12 @@ object WatchLink {
     /** The one link's dispatcher, for the single-watch [MessageDispatcher]. */
     val dispatcher: LinkDispatcher get() = link.dispatcher
 
+    /** The public calls on the one link, for the deprecated single-watch [org.avmedia.gshockapi.GShockAPI] calls. */
+    val api: org.avmedia.gshockapi.WatchApi get() = link.api
+
+    /** True for the one link: the steps that only a single-watch adapter has run on it alone. */
+    fun isTheOne(other: org.avmedia.gshockapi.link.WatchLink): Boolean = other === link
+
     /** What only the one link has. A link from the registry has none of this. */
     private fun singleWatchHooks(link: org.avmedia.gshockapi.link.WatchLink) {
         // The one link's watch is the connected one (a registry link is its key).

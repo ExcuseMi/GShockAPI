@@ -84,9 +84,9 @@ class OcwFirstConnectionTest {
         WatchInfo.setModelForTest("CASIO OCW-S7000")
         val protocol = WatchInfo.protocol
         withTimeoutOrNull(1_000) {
-            protocol.getTimer()
-            protocol.getAlarms()
-            protocol.getBasicSettings()
+            protocol.getTimer(org.avmedia.gshockapi.casio.WatchLink.link)
+            protocol.getAlarms(org.avmedia.gshockapi.casio.WatchLink.link)
+            protocol.getBasicSettings(org.avmedia.gshockapi.casio.WatchLink.link)
         }
         val codes = transport.sent.map { it.second.first() }
         assertTrue("requests sent: $codes", codes.none { it in setOf(0x13, 0x15, 0x16, 0x18) })

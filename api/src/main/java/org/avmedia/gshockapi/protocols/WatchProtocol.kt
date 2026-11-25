@@ -87,11 +87,11 @@ interface WatchProtocol {
     fun extractKey(data: String): Int?
 
     /**
-     * Called once per connection, after the connection kind (0x10) is known and before
+     * Called once per connection of [link], after the connection kind (0x10) is known and before
      * initialization completes. Watches that need extra steps on some connections, such
      * as pairing, override it. Default: nothing.
      */
-    suspend fun onInitialized() = Unit
+    suspend fun onInitialized(link: WatchLink) = Unit
 
     fun unwrapPayload(
         data: String,
@@ -100,40 +100,57 @@ interface WatchProtocol {
 
     fun getWatchConditionRequest(): String
 
+    /*
+     * The calls below run on the [WatchLink] they are given: its own reads, writes and answers. Steps that only a
+     * single-watch adapter has (other models' time code, the exercise profile, the Oceanus script) run only on the
+     * single-watch link ([singleWatchOnly]); only H5600-family watches are multi-link for now.
+     */
+
     suspend fun setTime(
+        link: WatchLink,
         timeMs: Long?,
         offset: Long?,
     )
 
-    suspend fun getTimer(): Int
+    suspend fun getTimer(link: WatchLink): Int
 
-    fun setTimer(timerValue: Int)
+    fun setTimer(link: WatchLink, timerValue: Int)
 
     fun getTimerRequest(): String
 
     fun getTimerSize(): Int
 
-    suspend fun getHomeTime(): String
+    suspend fun getHomeTime(link: WatchLink): String
 
-    suspend fun getBatteryLevel(): Int
+    suspend fun getBatteryLevel(link: WatchLink): Int
 
-    suspend fun getWatchTemperature(): Int
+    suspend fun getWatchTemperature(link: WatchLink): Int
 
-    suspend fun getAlarms(): ArrayList<Alarm>
+    suspend fun getAlarms(link: WatchLink): ArrayList<Alarm>
 
-    fun setAlarms(alarms: ArrayList<Alarm>)
+    fun setAlarms(link: WatchLink, alarms: ArrayList<Alarm>)
 
-    suspend fun getExerciseProfile(): org.avmedia.gshockapi.model.ExerciseProfile
+    suspend fun getExerciseProfile(link: WatchLink): org.avmedia.gshockapi.model.ExerciseProfile
 
-    fun setExerciseProfile(profile: org.avmedia.gshockapi.model.ExerciseProfile)
+    fun setExerciseProfile(link: WatchLink, profile: org.avmedia.gshockapi.model.ExerciseProfile)
 
-    suspend fun getSettings(): Settings
+    suspend fun getSettings(link: WatchLink): Settings
 
-    fun setSettings(settings: Settings)
+    fun setSettings(link: WatchLink, settings: Settings)
 
-    suspend fun getBasicSettings(): Settings
+    suspend fun getBasicSettings(link: WatchLink): Settings
 
-    suspend fun getTimeAdjustment(): TimeAdjustmentInfo
+    suspend fun getTimeAdjustment(link: WatchLink): TimeAdjustmentInfo
 
-    suspend fun getStepCount(peek: Boolean): StepCounterData
+    suspend fun getStepCount(link: WatchLink, peek: Boolean): StepCounterData
+}
+
+/**
+ * A step that only a single-watch adapter has (another model's time code, the exercise profile, the Oceanus script):
+ * it runs on the single-watch link only. On any other link it throws, so it never writes to or reads from the wrong watch.
+ */
+internal fun singleWatchOnly(link: WatchLink, what: String) {
+    if (!org.avmedia.gshockapi.casio.WatchLink.isTheOne(link)) {
+        throw UnsupportedOperationException("$what runs only on the single-watch link for now: only H5600-family watches are multi-link")
+    }
 }
