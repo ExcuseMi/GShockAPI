@@ -105,7 +105,7 @@ class LinkSourceCheckTest {
         only(
             "the single-watch connection context",
             Regex("""\bWatchLink\.connection\b"""),
-            emptySet(),
+            setOf("ConnectionSetup.kt"),
         )
 
     /** The per-link transfer and notification code reaches nothing of the single-watch adapter: only its own link. */

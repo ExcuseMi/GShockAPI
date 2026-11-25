@@ -19,6 +19,14 @@ class ConnectionSetup internal constructor(private val keepAlive: ConnectionKeep
 
         const val SETUP_WAIT_MS = 20_000L
 
+        /** The single-watch link's [isAutomaticConnect], for the current apps. New code asks its link's setup. */
+        @Deprecated("Single-watch: ask the link's own setup (link.connection.setup)")
+        fun isAutomaticConnect(): Boolean = WatchLink.connection.setup.isAutomaticConnect()
+
+        /** The single-watch link's [watchSetupDone], for the current apps. New code asks its link's setup. */
+        @Deprecated("Single-watch: ask the link's own setup (link.connection.setup)")
+        val watchSetupDone: Boolean get() = WatchLink.connection.setup.watchSetupDone
+
         /**
          * The value written back after reading [code]: `0x11` with bit 2 of value index 4 cleared, `0x3A` with value index 7 and 8 set
          * to `DC 05`, every other value as read. Used by the connection setup and by the LifeLog setup, so both write the same bytes.
