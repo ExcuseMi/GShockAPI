@@ -119,6 +119,6 @@ object WorkoutSummaryDecoder {
     }
 
     private fun profileValues(v: Map<String, Double?>): Map<String, Int> = buildMap<String, Int> {
-        for (k in listOf("age", "birthYear", "birthMonth", "birthDay", "male", "height", "weight", "hand")) v[k]?.let { put(k, it.toInt()) }
+        for (k in listOf("age", "birthYear", "birthMonth", "birthDay", "male", "height", "weight", "hand", "hrHighest", "hrRest", "vo2max")) v[k]?.let { put(k, it.toInt()) }
     }
 }
