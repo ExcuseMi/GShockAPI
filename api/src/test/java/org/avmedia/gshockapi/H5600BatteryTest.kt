@@ -28,4 +28,10 @@ class H5600BatteryTest {
         assertEquals(50, percent("CASIO GW-B5600", "28 0E 15"))
         assertEquals(100, percent("CASIO GW-B5600", "28 13 15"))
     }
+
+    @Test fun theBz5000UsesItsOwnRange() {
+        assertEquals(100, percent("CASIO GMW-BZ5000", "28 18 15"))
+        assertEquals(92, percent("CASIO GMW-BZ5000", "28 17 15"))
+        assertEquals(0, percent("CASIO GMW-BZ5000", "28 0C 15"))
+    }
 }
