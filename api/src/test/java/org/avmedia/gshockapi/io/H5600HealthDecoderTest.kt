@@ -154,4 +154,44 @@ class H5600HealthDecoderTest {
         assertEquals(62, data.h5600?.heartRate?.restingBpm)
         assertTrue(data.warnings.none { it.contains("differs") })
     }
+
+    private fun bcd(value: Int): Byte = (((value / 10) shl 4) or (value % 10)).toByte()
+
+    /** A 0x5A record for 2026-11-26: score 54, fell asleep 03:04, woke up 08:59. */
+    private fun nightRecord(): ByteArray =
+        ByteArray(55) { 0xFE.toByte() }.also { r ->
+            r[0] = bcd(26); r[1] = bcd(11); r[2] = bcd(26)
+            r[30] = 54; r[48] = 3; r[49] = 4; r[50] = 8; r[51] = 59
+        }
+
+    /** A 0x53 record starting 2026-11-26 02:41:00: awake, then light 23 minutes later, deep at 03:34. */
+    private fun stageRecord(): ByteArray =
+        ByteArray(2016).also { r ->
+            val b = java.nio.ByteBuffer.wrap(r).order(java.nio.ByteOrder.LITTLE_ENDIAN)
+            r[0] = bcd(26); r[1] = bcd(11); r[2] = bcd(26); r[3] = bcd(2); r[4] = bcd(41); r[5] = bcd(0)
+            val pairs = listOf(0 to -2, 1380 to -5, 3180 to -6)
+            for (i in 0 until 250) {
+                val at = 8 + i * 8
+                if (i < pairs.size) { b.putInt(at, pairs[i].first); b.putInt(at + 4, pairs[i].second) } else { b.putInt(at, -2); b.putInt(at + 4, 0x7FFFFFFE) }
+            }
+        }
+
+    @Test
+    fun framesAreFoundInTheOrderTheyWereAnnouncedNotOnlyInTheExpectedOrder() {
+        // The nightly record announced (and sent) before the stage timeline, and a section the decoder does not know
+        // between them: each is still found, and the unknown one is not read as part of the night.
+        val night = frame(0x5A, listOf(nightRecord()))
+        val unknown = frame(0x73, listOf(ByteArray(12) { 0x11 }))
+        val stages = frame(0x53, listOf(stageRecord()))
+        val announced = linkedMapOf(0x5A to night.size, 0x73 to unknown.size, 0x53 to stages.size)
+        val data = H5600HealthDecoder.decode(notifications(header(100, 10), night, unknown, stages), announced, zone)!!
+        val sleep = data.h5600!!.sleep!!
+        assertEquals(54, sleep.night?.sleepScore)
+        assertEquals(1, sleep.nights.size)
+        assertEquals(LocalDateTime.of(2026, 11, 26, 2, 41), sleep.stagesStart)
+        assertEquals(
+            listOf("awake" to LocalDateTime.of(2026, 11, 26, 2, 41), "light" to LocalDateTime.of(2026, 11, 26, 3, 4), "deep" to LocalDateTime.of(2026, 11, 26, 3, 34)),
+            sleep.stages.map { it.stage to it.time },
+        )
+    }
 }

@@ -253,13 +253,17 @@ object H5600HealthDecoder {
     ): Map<Int, IntRange> {
         val starts = linkedMapOf<Int, Int>()
         var searchFrom = HEADER_SIZE
-        for (tag in FRAME_ORDER) {
+        // The stream holds the frames in the order they were announced: search them in that order, so a section in
+        // another place than FRAME_ORDER expects (or one it does not list) is still found and does not end up
+        // inside the frame before it. A frame not found after the previous one is searched from the start.
+        val order = (announcedLengths.keys.filter { it != 0 } + FRAME_ORDER.toList()).distinct()
+        for (tag in order) {
             val length = announcedLengths[tag] ?: continue
             val needle =
                 ByteBuffer.allocate(FRAME_HEADER_SIZE).order(ByteOrder.LITTLE_ENDIAN)
                     .put(tag.toByte()).putInt(length).array()
-            val start = indexOf(stream, needle, searchFrom)
-            if (start >= 0) {
+            val start = indexOf(stream, needle, searchFrom).takeIf { it >= 0 } ?: indexOf(stream, needle, HEADER_SIZE)
+            if (start >= 0 && start !in starts.values) {
                 starts[tag] = start
                 searchFrom = start + FRAME_HEADER_SIZE
             }
