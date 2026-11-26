@@ -9,6 +9,13 @@ sealed class SettingWriteResult {
     /** The watch confirmed the write, but did not answer the read-back in time. Not a failure: the write itself was confirmed. */
     data object Written : SettingWriteResult()
 
+    /**
+     * The write went out but no write result came (a lost result, or a link busy with other jobs until the deadline),
+     * and the read-back did not answer either: the change may or may not be on the watch. Not a refusal: read the
+     * setting again later and report only a value that differs.
+     */
+    data object Unconfirmed : SettingWriteResult()
+
     data class Failed(val message: String) : SettingWriteResult()
 }
 
@@ -21,9 +28,11 @@ class WriteNotConfirmed(message: String) : Exception(message)
  * 1. read the current frame of request [code];
  * 2. the caller changes only the decoded fields, and says which frame bytes it may touch ([touched]);
  * 3. any other byte that differs stops the write;
- * 4. write (the write result must be OK), wait [settle], read again, and compare the whole frame with what was written.
+ * 4. write, wait [settle], read again, and compare the whole frame with what was written.
  * A read-back is only a safety check after the write result: no answer to it is not a failure ([SettingWriteResult.Written]);
- * a different value is reported once and never retried. No code here knows a layout.
+ * a different value is reported once and never retried. A write without a write result is no refusal either: the
+ * read-back decides (the same value: done, another value: not kept, no answer: [SettingWriteResult.Unconfirmed]).
+ * No code here knows a layout.
  */
 class SafeSettingWrite(
     private val read: suspend (code: Int) -> ByteArray?,
@@ -60,13 +69,15 @@ class SafeSettingWrite(
             return SettingWriteResult.Failed("The change would alter other bytes. Nothing was changed.")
         }
         if (after.contentEquals(before)) return SettingWriteResult.Unchanged
-        try {
-            write(after)
-        } catch (e: WriteNotConfirmed) {
-            return SettingWriteResult.Failed("The watch did not confirm the change. Check the setting on the watch.")
-        }
+        val confirmed =
+            try {
+                write(after)
+                true
+            } catch (e: WriteNotConfirmed) {
+                false
+            }
         settle()
-        val back = readValue() ?: return SettingWriteResult.Written
+        val back = readValue() ?: return if (confirmed) SettingWriteResult.Written else SettingWriteResult.Unconfirmed
         return if (matches(back, expectedBack(before, after))) {
             SettingWriteResult.Done
         } else {

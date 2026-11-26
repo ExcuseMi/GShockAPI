@@ -101,9 +101,25 @@ class SafeSettingWriteTest {
     }
 
     @Test
-    fun aWriteTheWatchDidNotConfirmIsReported() = runBlocking {
+    fun aWriteWithoutWriteResultThatTheWatchKeptIsDone() = runBlocking {
+        var onWatch = original
+        val w = SafeSettingWrite(read = { onWatch }, write = { onWatch = it; throw WriteNotConfirmed("no write result") })
+        val result = w.update(0x4F, PhysicalSettingsCodec.BEDTIME_BYTES) { PhysicalSettingsCodec.withBedtime(it, 22, 0) }
+        assertEquals(SettingWriteResult.Done, result)
+    }
+
+    @Test
+    fun aWriteWithoutWriteResultThatTheWatchDidNotKeepIsReported() = runBlocking {
         val w = SafeSettingWrite(read = { original }, write = { throw WriteNotConfirmed("no write result") })
         val result = w.update(0x4F, PhysicalSettingsCodec.BEDTIME_BYTES) { PhysicalSettingsCodec.withBedtime(it, 22, 0) }
         assertTrue(result is SettingWriteResult.Failed)
+    }
+
+    @Test
+    fun aWriteWithoutWriteResultOrReadBackIsUnconfirmedNotRefused() = runBlocking {
+        var reads = 0
+        val w = SafeSettingWrite(read = { if (reads++ == 0) original else null }, write = { throw WriteNotConfirmed("no write result") })
+        val result = w.update(0x4F, PhysicalSettingsCodec.BEDTIME_BYTES) { PhysicalSettingsCodec.withBedtime(it, 22, 0) }
+        assertEquals(SettingWriteResult.Unconfirmed, result)
     }
 }

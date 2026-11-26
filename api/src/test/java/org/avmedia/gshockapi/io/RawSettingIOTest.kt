@@ -263,11 +263,12 @@ class RawSettingIOTest {
         assertTrue(link.checked.isEmpty())
     }
 
-    @Test fun aWriteTheWatchDoesNotConfirmIsReported() = runBlocking {
+    /** No write result is no refusal: the read after it finds the value on the watch. */
+    @Test fun aWriteWithoutWriteResultIsDecidedByTheReadBack() = runBlocking {
         watch(face51)
         link.confirm = false
         val result = RawSettingIO.modifySafe(0x51, setOf(1)) { it.also { f -> f[1] = 2 } }
-        assertTrue(result is SettingWriteResult.Failed)
+        assertEquals(SettingWriteResult.Done, result)
     }
 
     @Test fun theSameCodeIsNeverChangedByTwoWritersAtOnce() = runBlocking {
