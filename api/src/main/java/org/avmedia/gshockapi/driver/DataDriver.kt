@@ -24,18 +24,25 @@ open class DataDriver(val file: DataFile) : WatchDriver {
         else -> null
     }
 
+    /**
+     * The pure codec of the frame setting [key] for this family (no watch needed), or null when the key is not one
+     * frame's setting here. A code driver adds its own.
+     */
+    open fun frameSetting(key: String): FrameSetting? = file.frameSetting(key)
+
     override suspend fun <T : Any> get(conn: WatchConnection, key: Key<T>): DriverResult<T> {
         unsupported(key, conn)?.let { return it }
-        val spec = file.settings[key.id] ?: return DriverResult.Unsupported(key.id, "no data-file layout for ${key.id}")
-        val value: Any = if (spec.type == "records") {
+        val value: Any = if (file.settings[key.id]?.type == "records") {
+            val spec = file.settings.getValue(key.id)
             val maps = spec.frames.flatMap { rf ->
-                val frame = conn.readFrame(rf.code) ?: return DriverResult.Failed(key.id, "The watch did not answer.")
+                val frame = conn.readFrame(rf.code) ?: return DriverResult.Failed(key.id, NO_ANSWER)
                 DataSettingCodec.decodeRecords(spec, frame).orEmpty()
             }
             if (key == Keys.ALARMS) maps.map(::slot) else maps
         } else {
-            val frame = conn.readFrame(spec.code) ?: return DriverResult.Failed(key.id, "The watch did not answer.")
-            DataSettingCodec.decode(spec, frame) ?: return DriverResult.Failed(key.id, "The watch sent a value this file does not know.")
+            val setting = frameSetting(key.id) ?: return DriverResult.Unsupported(key.id, "no layout for ${key.id}")
+            val frame = conn.readFrame(setting.code) ?: return DriverResult.Failed(key.id, NO_ANSWER)
+            setting.decode(frame) ?: return DriverResult.Failed(key.id, NOT_KNOWN)
         }
         if (!key.type.isInstance(value)) return DriverResult.Failed(key.id, "${key.id} is not a ${key.type.simpleName}")
         return DriverResult.Ok(key.type.cast(value)!!)
@@ -44,14 +51,14 @@ open class DataDriver(val file: DataFile) : WatchDriver {
     override suspend fun <T : Any> set(conn: WatchConnection, key: Key<T>, value: T): DriverResult<Unit> {
         unsupported(key, conn)?.let { return it }
         if (!key.writable) return DriverResult.Unsupported(key.id, "${key.id} is read-only")
-        val spec = file.settings[key.id] ?: return DriverResult.Unsupported(key.id, "no data-file layout for ${key.id}")
-        if (spec.type == "records") return setRecords(conn, key, spec, value)
-        val result = conn.modify(spec.code, DataSettingCodec.touched(spec)) { frame ->
-            val others = spec.requires?.let { r -> file.settings[r]?.let { mapOf(r to DataSettingCodec.decode(it, frame)) } }.orEmpty()
-            DataSettingCodec.encode(spec, frame, value, others)
-        }
-        return result.toDriverResult(key.id)
+        file.settings[key.id]?.takeIf { it.type == "records" }?.let { return setRecords(conn, key, it, value) }
+        val setting = frameSetting(key.id) ?: return DriverResult.Unsupported(key.id, "no layout for ${key.id}")
+        return write(conn, setting, value).toDriverResult(key.id)
     }
+
+    /** The checked write of [value] to [setting]: read, change only its bytes, write, read back. */
+    suspend fun write(conn: WatchConnection, setting: FrameSetting, value: Any): SettingWriteResult =
+        conn.modify(setting.code, setting.touched, setting::expectedBack, setting::matches) { frame -> setting.encode(frame, value) }
 
     private suspend fun setRecords(conn: WatchConnection, key: Key<*>, spec: SettingSpec, value: Any): DriverResult<Unit> {
         @Suppress("UNCHECKED_CAST")
@@ -72,6 +79,9 @@ open class DataDriver(val file: DataFile) : WatchDriver {
         conn.state.map { if (it == LinkState.DISCONNECTED) WatchEvent.Disconnected else WatchEvent.Connected }.distinctUntilChanged()
 
     companion object {
+        const val NO_ANSWER = "The watch did not answer."
+        const val NOT_KNOWN = "The watch sent a value this file does not know."
+
         fun slot(m: Map<String, Any>) = AlarmSlot(
             hour = m["hour"] as Int, minute = m["minute"] as Int, enabled = m["enabled"] == true,
             oneTime = m["one_time"] == true, hourlyChime = m["hourly_chime"] == true,

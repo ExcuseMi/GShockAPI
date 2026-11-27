@@ -232,6 +232,21 @@ class WatchApi internal constructor(private val link: WatchLink) {
 
     suspend fun setH5600WatchFaceNumber(face: Int) = h5600Settings.setWatchFaceNumber(face)
 
+    // Settings by key (the watch's driver, see org.avmedia.gshockapi.driver)
+
+    /** This watch bound to its driver: reads and writes are jobs on this watch's link, writes the checked read-modify-write. */
+    val driver: org.avmedia.gshockapi.driver.BoundWatch
+        get() = org.avmedia.gshockapi.driver.Drivers.bind(org.avmedia.gshockapi.driver.LinkConnection(link))
+
+    /** True when this watch's driver has [key] (`Keys.AUTO_LIGHT`, ...). */
+    fun has(key: org.avmedia.gshockapi.driver.Key<*>): Boolean = driver.has(key)
+
+    /** The value of [key] on this watch; Unsupported (nothing sent) when its driver does not have it. */
+    suspend fun <T : Any> get(key: org.avmedia.gshockapi.driver.Key<T>): org.avmedia.gshockapi.driver.DriverResult<T> = driver.get(key)
+
+    /** Writes [value] to [key] on this watch: read, change only its bytes, write, read back. */
+    suspend fun <T : Any> set(key: org.avmedia.gshockapi.driver.Key<T>, value: T): org.avmedia.gshockapi.driver.DriverResult<Unit> = driver.set(key, value)
+
     /** One raw settings frame (`0x45`, `0x4F`, ...) of this watch, null when it did not answer. */
     suspend fun readSettingFrame(code: Int): ByteArray? = link.rawSettings.readFrame(code)
 

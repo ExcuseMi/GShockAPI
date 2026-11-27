@@ -10,7 +10,8 @@ object DataSettingCodec {
 
     private fun shift(mask: Int): Int = Integer.numberOfTrailingZeros(mask)
 
-    private fun fits(spec: SettingSpec, frame: ByteArray): Boolean =
+    /** [frame] is of [spec]'s code and long enough to hold it. */
+    fun fits(spec: SettingSpec, frame: ByteArray): Boolean =
         frame.isNotEmpty() && (frame[0].toInt() and 0xFF) == spec.code && frame.size >= maxOf(spec.minLength, last(spec) + 1)
 
     private fun last(spec: SettingSpec): Int = when (spec.type) {
@@ -19,8 +20,8 @@ object DataSettingCodec {
         else -> spec.byte
     }
 
-    /** The frame bytes a change of [spec] may touch (for the checked write). */
-    fun touched(spec: SettingSpec): Set<Int> = (spec.byte..last(spec)).toSet()
+    /** The frame bytes a change of [spec] may touch (for the checked write): its own, its write flags and its command byte. */
+    fun touched(spec: SettingSpec): Set<Int> = (spec.byte..last(spec)).toSet() + spec.onWriteSet.keys + listOfNotNull(spec.command?.first)
 
     private fun inRange(spec: SettingSpec, v: Int): Boolean =
         (spec.allowed.isEmpty() || v in spec.allowed) && (spec.min == null || v >= spec.min) && (spec.max == null || v <= spec.max)
@@ -36,7 +37,7 @@ object DataSettingCodec {
                 val bytes = (0 until spec.length).map { u8(frame, spec.byte + it) ?: return null }
                 val v = (if (spec.littleEndian) bytes else bytes.reversed()).withIndex().sumOf { (i, x) -> x shl (8 * i) }
                 val masked = if (spec.length == 1) (v and spec.mask) shr shift(spec.mask) else v
-                masked.takeIf { inRange(spec, it) }
+                masked.takeIf { !spec.rangeOnRead || inRange(spec, it) }
             }
             "time" -> {
                 val m = u8(frame, spec.byte + 1) ?: return null
@@ -51,7 +52,10 @@ object DataSettingCodec {
      * (the decoded values of the settings this one [SettingSpec.requires]) forbid it.
      */
     fun encode(spec: SettingSpec, frame: ByteArray, value: Any, others: Map<String, Any?> = emptyMap()): ByteArray? {
-        if (decode(spec, frame) == null && !(spec.writeOverUnknown && fits(spec, frame))) return null
+        val current = decode(spec, frame)
+        if (current == null && !(spec.writeOverUnknown && fits(spec, frame))) return null
+        // A command frame is written only for a change: the same value gives the frame as it is (nothing is written).
+        if (spec.command != null && current == value) return frame.copyOf()
         val out = frame.copyOf()
         val b = u8(frame, spec.byte)!!
         fun put(at: Int, v: Int) { out[at] = v.toByte() }
@@ -64,7 +68,9 @@ object DataSettingCodec {
                 put(spec.byte, next)
             }
             "choice" -> {
-                val raw = spec.values[value as? String ?: return null] ?: return null
+                val name = value as? String ?: return null
+                if (spec.settable.isNotEmpty() && name !in spec.settable) return null
+                val raw = spec.values[name] ?: return null
                 put(spec.byte, (b and spec.mask.inv()) or ((raw shl shift(spec.mask)) and spec.mask))
             }
             "uint" -> {
@@ -87,6 +93,8 @@ object DataSettingCodec {
             }
             else -> return null
         }
+        spec.onWriteSet.forEach { (at, bits) -> out[at] = ((out[at].toInt() and 0xFF) or bits).toByte() }
+        spec.command?.let { (at, v) -> out[at] = v.toByte() }
         return out
     }
 

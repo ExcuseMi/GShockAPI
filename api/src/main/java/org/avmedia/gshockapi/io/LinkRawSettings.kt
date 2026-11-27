@@ -217,6 +217,15 @@ class LinkRawSettings internal constructor(private val watchLink: WatchLink) {
     suspend fun modifySafe(code: Int, touched: Set<Int>, change: (ByteArray) -> ByteArray?): SettingWriteResult =
         withLock(code) { safeWriter().update(code, touched) { change(it.copyOf()) } }
 
+    /** [modifySafe] for a frame the watch answers differently from the one written ([expectedBack]), compared by [matches]. */
+    suspend fun modifySafe(
+        code: Int,
+        touched: Set<Int>,
+        expectedBack: (before: ByteArray, written: ByteArray) -> ByteArray,
+        matches: (back: ByteArray, expected: ByteArray) -> Boolean,
+        change: (ByteArray) -> ByteArray?,
+    ): SettingWriteResult = withLock(code) { safeWriter().update(code, touched, expectedBack, matches) { change(it.copyOf()) } }
+
     /** The checked writer every setting write goes through: [read] defaults to [readFrame]. */
     fun safeWriter(read: suspend (Int) -> ByteArray? = ::readFrame): SafeSettingWrite =
         SafeSettingWrite(

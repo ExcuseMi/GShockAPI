@@ -33,8 +33,21 @@ data class SettingSpec(
     val max: Int? = null,
     val clearWhenFalse: Int = 0,
     val requires: String? = null,
-    /** A value may be written over a current value this file does not know (else such a frame is never written). */
+    /**
+     * A choice may be written over a current value this file does not know (else such a frame is never written). Only
+     * the setting's own mask bits change, and [validWith] still holds.
+     */
     val writeOverUnknown: Boolean = false,
+    /** Other settings of the same frame that must be readable (when the frame has their bytes) before this one is read or written. */
+    val validWith: List<String> = emptyList(),
+    /** False: a uint is read whatever its value, [min], [max] and [allowed] are checked only on a write. */
+    val rangeOnRead: Boolean = true,
+    /** For a choice: the values that may be written (empty: all of [values]). */
+    val settable: List<String> = emptyList(),
+    /** Bits set by every write of this setting: frame byte to bits (a "set by the user" flag). */
+    val onWriteSet: Map<Int, Int> = emptyMap(),
+    /** A command byte (frame byte to value) put in a write that changes the value; the watch answers with the byte as it was. */
+    val command: Pair<Int, Int>? = null,
     val recordSize: Int = 0,
     val frames: List<RecordFrame> = emptyList(),
     val fields: List<RecordField> = emptyList(),
@@ -42,7 +55,7 @@ data class SettingSpec(
     val verified: Boolean = true,
 )
 
-/** A watch family's data file (see docs/drivers/h5600.json). */
+/** A watch family's data file (the library's own: `org/avmedia/gshockapi/driver/h5600.json` in its resources). */
 data class DataFile(
     val id: String,
     /** The code driver family this file is for ([DriverFamily.family]). */
@@ -53,6 +66,12 @@ data class DataFile(
     val settings: Map<String, SettingSpec>,
 ) {
     fun model(advertisedName: String): ModelEntry? = models.firstOrNull { it.name == modelName(advertisedName) }
+
+    /** The checked codec of the frame setting [key] (guards and the required setting resolved); null for records or an unknown key. */
+    fun frameSetting(key: String): DataSetting? {
+        val spec = settings[key]?.takeIf { it.type != "records" } ?: return null
+        return DataSetting(spec, spec.validWith.mapNotNull(settings::get), spec.requires?.let(settings::get))
+    }
 
     companion object {
         /** "CASIO GBX-H5600" is "GBX-H5600"; only exact names match, never a part. */
@@ -77,8 +96,14 @@ data class DataFile(
                 } else {
                     require(s.code in 1..0xFF && s.byte >= 1 && s.mask in 1..0xFF && s.length in 1..4) { "$where: bad code, byte, mask or length" }
                     require(s.type != "choice" || s.values.isNotEmpty()) { "$where: a choice without values" }
+                    require(s.settable.all { it in s.values }) { "$where: a settable value that is not a value" }
+                    // Writing over an unknown value is for the bits of a choice only, never a whole byte, a number or a time.
+                    require(!s.writeOverUnknown || (s.type == "choice" && s.mask != 0xFF)) { "$where: write_over_unknown only for a masked choice" }
+                    require((s.onWriteSet.keys + listOfNotNull(s.command?.first)).all { it >= 1 }) { "$where: a write may not touch the code byte" }
                 }
-                require(s.requires == null || s.requires in file.settings) { "$where: requires unknown ${s.requires}" }
+                val sameFrame = { k: String -> file.settings[k]?.let { it.type != "records" && it.code == s.code } == true }
+                require(s.requires == null || sameFrame(s.requires)) { "$where: requires ${s.requires}, which is not in the same frame" }
+                require(s.validWith.all(sameFrame)) { "$where: valid_with names a setting that is not in the same frame" }
             }
         }
 
@@ -128,6 +153,11 @@ data class DataFile(
             }.orEmpty(),
             fixed = o.getAsJsonObject("fixed")?.entrySet()?.associate { it.key.toInt() to hexValue(it.value) }.orEmpty(),
             verified = o.get("verified")?.asBoolean ?: true,
+            validWith = o.strings("valid_with"),
+            rangeOnRead = o.get("range_on_read")?.asBoolean ?: true,
+            settable = o.strings("settable"),
+            onWriteSet = o.getAsJsonObject("on_write_set")?.entrySet()?.associate { it.key.toInt() to hexValue(it.value) }.orEmpty(),
+            command = o.getAsJsonObject("command")?.let { c -> c.int("byte")!! to hexValue(c.get("value")) },
         )
 
         private fun JsonObject.str(name: String): String? = get(name)?.takeIf { it.isJsonPrimitive }?.asString

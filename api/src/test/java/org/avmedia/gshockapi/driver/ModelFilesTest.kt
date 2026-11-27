@@ -15,7 +15,7 @@ import org.junit.Test
 
 /** Family and model files merge in their order; bad files are refused with a reason. "GBX-H5600X" is made up. */
 class ModelFilesTest {
-    private val family = File("../docs/drivers/h5600.json").readText()
+    private val family = File("src/main/resources/" + Drivers.H5600_FILE).readText()
     private fun files() = ModelFiles(ModelFiles.families(listOf(H5600Family()))).also { it.register(family, fromLibrary = true).getOrThrow() }
 
     private val variant = """
@@ -86,7 +86,9 @@ class ModelFilesTest {
     private class NoWatch(override val name: String) : WatchConnection {
         override val state: StateFlow<LinkState> = MutableStateFlow(LinkState.READY)
         override suspend fun readFrame(code: Int): ByteArray? = null
-        override suspend fun modify(code: Int, touched: Set<Int>, change: (ByteArray) -> ByteArray?) = SettingWriteResult.Failed("no watch")
+        override suspend fun modify(
+            code: Int, touched: Set<Int>, expectedBack: (ByteArray, ByteArray) -> ByteArray, matches: (ByteArray, ByteArray) -> Boolean, change: (ByteArray) -> ByteArray?,
+        ) = SettingWriteResult.Failed("no watch")
     }
 
     @Test fun aRemovedCapabilityIsUnsupportedOnThatModelOnly() = runTest {

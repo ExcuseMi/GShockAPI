@@ -41,6 +41,38 @@ object Keys {
     val SMART_ALARM_SNOOZE = Key.of<Boolean>("smart_alarm.snooze")
     val SMART_ALARM_TIME = Key.of<TimeOfDay>("smart_alarm.time")
     val SMART_ALARM_WINDOW = Key.of<Int>("smart_alarm.window")
+    val NIGHT_START = Key.of<TimeOfDay>("sleep.night_start")
+    val NIGHT_END = Key.of<TimeOfDay>("sleep.night_end")
+    val HR_MAX = Key.of<Int>("hr.max")
+    val HR_RESTING = Key.of<Int>("hr.resting")
+    val VO2MAX = Key.of<Int>("fitness.vo2max")
+    val TRAINING_BACKGROUND = Key.of<String>("fitness.training_background")
+    val FACE_CUSTOM_ITEM = Key.of<String>("face.custom_item")
+    val NOTIFICATION_SOUND = Key.of<String>("notifications.sound")
+    val NOTIFICATION_VIBRATION = Key.of<String>("notifications.vibration")
+    val NOTIFICATION_PATTERN = Key.of<String>("notifications.pattern")
+    val NOTIFICATION_LANGUAGE = Key.of<Int>("notifications.language")
+    val NOTIFICATION_OFF_AT_NIGHT = Key.of<Int>("notifications.off_at_night")
+
+    // Code keys: settings whose layout a data file cannot say (the H5600 driver's code).
+    /** Whole centimetres; the driver converts for a watch that counts in inches. */
+    val HEIGHT_CM = Key.of<Int>("profile.height_cm")
+
+    /** Whole kilograms; the driver converts for a watch that counts in pounds. */
+    val WEIGHT_KG = Key.of<Int>("profile.weight_kg")
+
+    /** `YYYY-MM-DD`. */
+    val BIRTH_DATE = Key.of<String>("profile.birth_date")
+
+    /** "male" or "female". */
+    val SEX = Key.of<String>("profile.sex")
+
+    /** One activity in the watch's activity list, on or off: `activities.running`, `activities.gym_workout`. */
+    fun activity(name: String): Key<Boolean> = Key.of("activities.${word(name)}")
+
+    /** "Gym workout" is "gym_workout": lower case, words joined by `_`. */
+    fun word(text: String): String =
+        text.lowercase().map { if (it.isLetterOrDigit()) it else '_' }.joinToString("").trim('_').replace(Regex("_+"), "_")
 
     @Suppress("UNCHECKED_CAST")
     val ALARMS: Key<List<AlarmSlot>> = Key("alarms", List::class.java as Class<List<AlarmSlot>>)

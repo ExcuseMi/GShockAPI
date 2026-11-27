@@ -1,0 +1,150 @@
+{
+  "schema": 1,
+  "kind": "watch-driver",
+  "id": "h5600",
+  "family": "h5600",
+  "title": "H5600 family (modules 3515, 3516, 3577, 3586)",
+  "code_driver": "org.avmedia.gshockapi.driver.H5600Driver",
+  "about": "Frame positions count the command code as byte 0, as the requests and answers are on the wire. Every setting is written by read, change only its own bytes, write, read back. 'valid_with' names the settings of the same frame that must be readable too (when the frame has their bytes) before this one is read or written, as the frame's whole layout is checked today. 'verified': false means the layout is in the library code but the code itself says it is not confirmed on this family, or the value was not found in the code.",
+  "models": [
+    { "name": "GBX-H5600", "module": "3586", "faces": 4, "capabilities_add": ["face.tide", "tide.send"] },
+    { "name": "DW-H5600", "module": "3516", "faces": 3 },
+    { "name": "GM-H5600", "module": "3577", "faces": 3 },
+    { "name": "GBD-H2000", "module": "3515", "faces": 3, "verified": false,
+      "note": "In the model table with the DW-H5600 settings; no test or code path checks the frames on this model." },
+    { "name": "DW-GH5600", "module": "3515", "faces": 3, "verified": false,
+      "note": "As GBD-H2000." }
+  ],
+  "facts": {
+    "alarm_count": 4,
+    "always_connected": true,
+    "battery": {
+      "code": "0x28",
+      "byte": 1,
+      "min": 0,
+      "max": 6
+    },
+    "light_durations": {
+      "short": "1.5s",
+      "long": "5s"
+    }
+  },
+  "capabilities": [
+    "light.auto_light", "light.duration", "units.length", "steps.reminder", "steps.goal", "sleep.night_start",
+    "sleep.night_end", "sleep.bedtime", "sleep.wake_up", "hr.measurement", "hr.max", "hr.resting",
+    "fitness.vo2max", "fitness.training_background", "profile.height_cm", "profile.weight_kg", "profile.birth_date", "profile.sex",
+    "sound.mode", "notifications.sound", "notifications.vibration", "notifications.pattern", "notifications.language", "notifications.off_at_night",
+    "face.number", "face.custom_item", "smart_alarm.on", "smart_alarm.snooze", "smart_alarm.time", "smart_alarm.window",
+    "alarms", "activities.running", "activities.walking", "activities.gym_workout", "activities.interval_timer", "time.sync",
+    "steps.today", "lifelog", "sleep.records", "workouts", "notifications.text", "battery.level"
+  ],
+  "code_only": {
+    "time.sync": "Time, DST and world cities in a fixed order with the home location (0x24) in the middle; stamped when its turn comes.",
+    "steps.today": "From the LifeLog transfer (multi-packet, own channels), not from an activity record.",
+    "lifelog": "Header, sections, block confirmations, stall and retry rules.",
+    "sleep.records": "0x5A and 0x53 sections, nights and stages.",
+    "workouts": "Group headers, chunks and laps on the transfer channels.",
+    "notifications.text": "0x3D gate, MTU and chunking.",
+    "battery.level": "0x28 index 0 step 0..6, shown as step * 100 / 6.",
+    "connection.setup": "0x39 time manager read and written back after connecting; 0x49 and 0x47 answered at any time.",
+    "profile.height_cm": "0x45: bytes 2 to 9 are bit-inverted, height and weight are BCD pairs whose order is told from a plausible height, and the watch may count in inches and pounds (flag bits); the driver speaks cm and kg.",
+    "profile.weight_kg": "As profile.height_cm.",
+    "profile.birth_date": "0x45 bytes 6 to 9, BCD under the inversion; a real calendar date from 1900 to 2100, as YYYY-MM-DD.",
+    "profile.sex": "0x45 byte 1 bit 0 (0 male, 1 female), written only while the whole profile is readable.",
+    "activities.running": "0x53: the list of 14 slots; switching one activity on adds it at the end, off takes it out; the tail after slot 14 is sent back as read and not compared."
+  },
+  "settings": [
+    { "key": "light.auto_light", "type": "bool", "code": "0x13", "byte": 1, "mask": "0x04", "invert": true, "min_length": 3, "verified": false,
+      "note": "Set bit means off. The library code says this polarity is not confirmed on this family." },
+    { "key": "light.duration", "type": "choice", "code": "0x13", "byte": 2, "mask": "0x0F", "min_length": 3, "values": {"short": 0, "long": 1}, "write_over_unknown": true,
+      "note": "Written over a nibble this file does not know (as the light codec does): only the nibble's own bits change." },
+    { "key": "units.length", "type": "choice", "code": "0x13", "byte": 12, "mask": "0x01", "min_length": 17, "values": {"km": 0, "miles": 1}, "valid_with": ["sleep.night_start", "sleep.night_end"] },
+    { "key": "steps.reminder", "type": "bool", "code": "0x13", "byte": 12, "mask": "0x02", "min_length": 17, "valid_with": ["sleep.night_start", "sleep.night_end"] },
+    { "key": "sleep.night_start", "type": "time", "code": "0x13", "byte": 13, "min_length": 17, "valid_with": ["sleep.night_end"],
+      "note": "The window the watch reads sleep in. Written alone; the end stays as it is, and must be readable." },
+    { "key": "sleep.night_end", "type": "time", "code": "0x13", "byte": 15, "min_length": 17, "valid_with": ["sleep.night_start"] },
+    { "key": "hr.measurement", "type": "choice", "code": "0x41", "byte": 1, "mask": "0x03", "min_length": 5, "values": {"off": 0, "activities": 1, "always": 2} },
+    { "key": "sleep.bedtime", "type": "time", "code": "0x4F", "byte": 2, "min_length": 6, "valid_with": ["sleep.wake_up"] },
+    { "key": "sleep.wake_up", "type": "time", "code": "0x4F", "byte": 4, "min_length": 6, "valid_with": ["sleep.bedtime"] },
+    { "key": "fitness.training_background", "type": "choice", "code": "0x4F", "byte": 1, "min_length": 10, "values": {"not_set": 0, "occasional": 1, "regular": 2, "frequent": 3, "heavy": 4, "semi_pro": 5, "pro": 6} },
+    { "key": "hr.max", "type": "uint", "code": "0x4F", "byte": 7, "min_length": 10, "min": 100, "max": 230, "range_on_read": false, "valid_with": ["fitness.training_background"], "on_write_set": {"6": "0x01"},
+      "note": "A write also sets its 'set by the user' bit (byte 6 bit 0)." },
+    { "key": "hr.resting", "type": "uint", "code": "0x4F", "byte": 8, "min_length": 10, "min": 30, "max": 120, "range_on_read": false, "valid_with": ["fitness.training_background"], "on_write_set": {"6": "0x02"} },
+    { "key": "fitness.vo2max", "type": "uint", "code": "0x4F", "byte": 9, "min_length": 10, "min": 10, "max": 90, "range_on_read": false, "valid_with": ["fitness.training_background"], "on_write_set": {"6": "0x04"} },
+    { "key": "steps.goal", "type": "uint", "code": "0x43", "byte": 1, "length": 3, "order": "little", "min_length": 4, "min": 100, "max": 200000 },
+    { "key": "smart_alarm.on", "type": "bool", "code": "0x50", "byte": 3, "mask": "0x01", "min_length": 5, "clear_when_false": "0x02", "valid_with": ["smart_alarm.time"],
+      "note": "Off also clears the snooze bit." },
+    { "key": "smart_alarm.snooze", "type": "bool", "code": "0x50", "byte": 3, "mask": "0x02", "min_length": 5, "requires": "smart_alarm.on", "valid_with": ["smart_alarm.time"],
+      "note": "Can be switched on only while the smart alarm is on." },
+    { "key": "smart_alarm.time", "type": "time", "code": "0x50", "byte": 1, "min_length": 5 },
+    { "key": "smart_alarm.window", "type": "uint", "code": "0x50", "byte": 4, "min_length": 5, "allowed": [15, 30, 45, 60], "range_on_read": false, "valid_with": ["smart_alarm.time"] },
+    { "key": "face.number", "type": "uint", "code": "0x51", "byte": 1, "min_length": 6, "min": 1, "max": 4, "range_on_read": false,
+      "note": "1 time only, 2 custom, 3 steps, 4 tide. Read as it is; written 1 up to the model's 'faces' (3 or 4)." },
+    { "key": "face.custom_item", "type": "choice", "code": "0x51", "byte": 4, "min_length": 6, "values": {"steps": 0, "step_goal_graph": 1, "training_status": 2, "monthly_distance_run": 3, "monthly_distance_walk": 4, "monthly_distance_bike": 5, "floors": 6, "monthly_graph_run": 7, "monthly_graph_walk": 8, "monthly_graph_bike": 9, "heart_rate": 10, "highest_lowest_heart_rate": 11, "sleep_score_and_level": 12, "sleep_time": 13, "sleep_rating": 14, "stress_score": 15, "calories": 16, "active_time": 17, "sunrise_sunset": 18, "moon_age": 19}, "settable": ["steps", "training_status", "monthly_distance_run", "monthly_distance_walk", "heart_rate", "highest_lowest_heart_rate", "sleep_score_and_level", "sleep_time", "sleep_rating", "calories", "active_time", "sunrise_sunset", "moon_age"],
+      "note": "The top-right item of the custom face (slot 3); slots 1, 2 and 4 are never written. Only the items the watch offers are written." },
+    { "key": "sound.mode", "type": "choice", "code": "0x42", "byte": 1, "min_length": 6, "values": {"all_off": 0, "sound_only": 2, "custom": 5, "vibe_only": 8, "all_on": 10},
+      "note": "Sound and vibration modes together, as one byte (notifications.sound and notifications.vibration are its two halves)." },
+    { "key": "notifications.sound", "type": "choice", "code": "0x42", "byte": 1, "mask": "0x03", "min_length": 6, "values": {"off": 0, "custom_per_event": 1, "on": 2}, "valid_with": ["notifications.vibration", "notifications.pattern"] },
+    { "key": "notifications.vibration", "type": "choice", "code": "0x42", "byte": 1, "mask": "0x0C", "min_length": 6, "values": {"off": 0, "custom_per_event": 1, "on": 2}, "valid_with": ["notifications.sound", "notifications.pattern"] },
+    { "key": "notifications.pattern", "type": "choice", "code": "0x42", "byte": 6, "min_length": 7, "values": {"mute": 0, "pattern_a": 1, "pattern_b": 2, "pattern_c": 3}, "valid_with": ["notifications.sound", "notifications.vibration"],
+      "note": "The GBX-H5600 answers without this byte: it has no pattern." },
+    { "key": "notifications.language", "type": "uint", "code": "0x3D", "byte": 2, "mask": "0x03", "min_length": 8, "min": 0, "max": 3, "command": {"byte": 1, "value": "0x31"}, "verified": false,
+      "note": "Read as 3D 30; written with byte 1 = 31 and only when it changes; the watch answers with byte 1 as before. The meaning of the values is not confirmed." },
+    { "key": "notifications.off_at_night", "type": "uint", "code": "0x3D", "byte": 7, "mask": "0x06", "min_length": 8, "min": 0, "max": 3, "command": {"byte": 1, "value": "0x32"}, "verified": false,
+      "note": "As notifications.language, with byte 1 = 32." },
+    {
+      "key": "alarms",
+      "type": "records",
+      "record_size": 4,
+      "frames": [
+        {
+          "code": "0x15",
+          "offset": 1,
+          "count": 1
+        },
+        {
+          "code": "0x16",
+          "offset": 1,
+          "count": 3,
+          "note": "Alarms 2 to 4; the family has 4 alarms in all."
+        }
+      ],
+      "fields": [
+        {
+          "name": "enabled",
+          "type": "bool",
+          "byte": 0,
+          "mask": "0x40"
+        },
+        {
+          "name": "one_time",
+          "type": "bool",
+          "byte": 0,
+          "mask": "0x20"
+        },
+        {
+          "name": "hourly_chime",
+          "type": "bool",
+          "byte": 0,
+          "mask": "0x80"
+        },
+        {
+          "name": "hour",
+          "type": "uint",
+          "byte": 2,
+          "max": 23
+        },
+        {
+          "name": "minute",
+          "type": "uint",
+          "byte": 3,
+          "max": 59
+        }
+      ],
+      "fixed": {
+        "1": "0x40"
+      },
+      "note": "Today the library writes alarms as whole new frames, and never sets one_time on the first alarm; the data codec keeps unknown bits."
+    }
+  ]
+}

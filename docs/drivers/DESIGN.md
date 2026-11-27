@@ -2,11 +2,14 @@
 
 An example to discuss, not a migration. It answers the question in discussion #177 ("adding individual watches could
 be implemented as a plugin") with the H5600 family (GBX-H5600) as the worked case. Requests it should make easy:
-B2100 (#36), GST-B100 (#128). Nothing here is wired in; no behaviour changes.
+B2100 (#36), GST-B100 (#128). Steps 1 to 3 below are done for the H5600 settings: `WatchApi.get` and `set` work on a
+live link, the old calls stay as they are.
 
-Files: `h5600.json` (the family data file), `api/src/main/java/org/avmedia/gshockapi/driver/` (the sketch),
+Files: `api/src/main/resources/org/avmedia/gshockapi/driver/h5600.json` (the family data file, shipped in the library),
+`api/src/main/java/org/avmedia/gshockapi/driver/` (the engine and the drivers),
 `api/src/test/java/org/avmedia/gshockapi/driver/` (`H5600DataFileTest`: the file against today's codecs;
-`ModelFilesTest`: merging and refusals).
+`H5600SettingsTest`: every setting against its old codec, the checked write on a fake watch; `ModelFilesTest`: merging
+and refusals).
 
 ## Parts
 
@@ -14,7 +17,7 @@ Files: `h5600.json` (the family data file), `api/src/main/java/org/avmedia/gshoc
 interface WatchConnection {                 // engine side, one connected watch
     val name: String; val state: StateFlow<LinkState>
     suspend fun readFrame(code: Int): ByteArray?
-    suspend fun modify(code: Int, touched: Set<Int>, change: (ByteArray) -> ByteArray?): SettingWriteResult
+    suspend fun modify(code: Int, touched: Set<Int>, expectedBack, matches, change: (ByteArray) -> ByteArray?): SettingWriteResult
 }
 interface WatchDriver {                     // one family, stateless
     fun matches(advertisedName: String): Boolean
@@ -79,7 +82,7 @@ values inherited). `ModelFilesTest` checks this merge, the order, the refusals a
 | model names, module, face count, per-model extras | the connection setup (0x39 read and written back, 0x49, 0x47) |
 | the capability list | time sync (fixed write order, home location in the middle, stamped on its turn) |
 | settings that are bits or bytes in one frame: position, mask, polarity, value names, ranges, allowed values | multi-packet reads: LifeLog, sleep (0x5A, 0x53), workouts, tide send |
-| small rules: "off also clears bit 0x02", "only while X is on", "write over an unknown value" | anything with timing, retries, channels or state across frames |
+| small rules: "off also clears bit 0x02", "only while X is on", "only while the rest of the frame is readable" (`valid_with`), "also sets its user flag", a command byte | anything with timing, retries, channels or state across frames |
 | fixed-size records (alarm slots) | notification text (gate, MTU, chunks), battery scaling |
 
 The rule: if a setting is "read frame, change my bits, write, read back", it is data. A data file is safe to accept
@@ -103,7 +106,7 @@ setting order and conditions in its catalog. Those stay in the app. Only the byt
 Each step builds and ships on its own; the app keeps working after each.
 
 1. **Add the package** (this branch): interfaces, `DataDriver`, `H5600Driver` delegating to today's code, tests that
-   the data file gives the same bytes as the codecs. Not wired in.
+   the data file gives the same bytes as the codecs.
 2. **Ship the H5600 file** as a library resource. `WatchApi` gets `get(key)` and `set(key, value)` that call the bound
    driver. The old calls stay.
 3. **Settings, one at a time**: auto light, light duration, units, HR measurement, smart alarm, step goal, sleep times,
@@ -139,5 +142,16 @@ suspend fun getAlarms(): ArrayList<Alarm> = ...
 2. Auto light polarity (bit set means off) is not confirmed on this family.
 3. Should a data file be allowed to add a capability the library has no key for (shown as raw)?
 
-Settled (owner, 2026-11-27): the H5600 family has 4 alarms (1 in 0x15, 3 in 0x16, so 3 records written is right);
+Settled: the H5600 family has 4 alarms (1 in 0x15, 3 in 0x16, so 3 records written is right);
 data files are JSON; key ids are one shared list in the library (`Keys`), so apps and plugins use the same names.
+
+Settled in step 3 (as safe as the old codecs, checked by `H5600SettingsTest`):
+- `write_over_unknown`: only for a choice with a mask (light duration), as the light codec does; the file is refused
+  for any other setting. Only the mask bits change and `valid_with` still holds.
+- Cross-field checks: `valid_with` names the settings of the same frame that must be readable (when the frame holds
+  their bytes) before a setting is read or written, as each old codec checks its whole layout (the night window, the
+  sleep times, the smart alarm time, the notification modes and pattern). `requires` stays for "only while X is on".
+- Profile (0x45) and the activity list (0x53) are code in `H5600Driver` (inverted BCD in cm or inches; a list toggled
+  in the fresh frame); they are keys like the others.
+- Not moved yet (own requests per activity or unit): the per-activity items (0x54), the tide settings (0x2E), the
+  notification event masks.

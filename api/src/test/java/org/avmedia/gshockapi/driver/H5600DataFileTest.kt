@@ -35,7 +35,7 @@ import org.junit.Test
  * frames of the existing codec tests (WatchSettingCodecsTest, LinkIOTest).
  */
 class H5600DataFileTest {
-    private val file = DataFile.parse(File("../docs/drivers/h5600.json").readText())
+    private val file = DataFile.parse(File("src/main/resources/" + Drivers.H5600_FILE).readText())
     private fun spec(key: Key<*>) = file.settings.getValue(key.id)
     private fun frame(code: Int, vararg values: Int) = byteArrayOf(code.toByte()) + values.map { it.toByte() }.toByteArray()
     private fun hex(s: String) = s.split(" ").map { it.toInt(16).toByte() }.toByteArray()
@@ -192,8 +192,10 @@ class H5600DataFileTest {
     private class FakeConnection(override val name: String, val frames: MutableMap<Int, ByteArray>) : WatchConnection {
         override val state: StateFlow<LinkState> = MutableStateFlow(LinkState.READY)
         override suspend fun readFrame(code: Int): ByteArray? = frames[code]?.copyOf()
-        override suspend fun modify(code: Int, touched: Set<Int>, change: (ByteArray) -> ByteArray?): SettingWriteResult =
-            SafeSettingWrite(::readFrame, { f -> frames[f[0].toInt() and 0xFF] = f }).update(code, touched, change = change)
+        override suspend fun modify(
+            code: Int, touched: Set<Int>, expectedBack: (ByteArray, ByteArray) -> ByteArray, matches: (ByteArray, ByteArray) -> Boolean, change: (ByteArray) -> ByteArray?,
+        ): SettingWriteResult =
+            SafeSettingWrite(::readFrame, { f -> frames[f[0].toInt() and 0xFF] = f }).update(code, touched, expectedBack, matches, change)
     }
 
     @Test fun theDataDriverReadsAndWritesThroughTheCheckedWriter() = runTest {

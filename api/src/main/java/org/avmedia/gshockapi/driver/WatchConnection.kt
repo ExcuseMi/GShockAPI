@@ -21,8 +21,17 @@ interface WatchConnection {
     /** The answer to the default request of [code], code first; null when the watch did not answer or refused. */
     suspend fun readFrame(code: Int): ByteArray?
 
-    /** Checked read-modify-write: [change] may touch only the frame bytes in [touched]; written, then read back. */
-    suspend fun modify(code: Int, touched: Set<Int>, change: (ByteArray) -> ByteArray?): SettingWriteResult
+    /**
+     * Checked read-modify-write: [change] may touch only the frame bytes in [touched]; written, then read back and
+     * compared ([matches]) with what the watch should answer ([expectedBack]).
+     */
+    suspend fun modify(
+        code: Int,
+        touched: Set<Int>,
+        expectedBack: (before: ByteArray, written: ByteArray) -> ByteArray = { _, written -> written },
+        matches: (back: ByteArray, expected: ByteArray) -> Boolean = { back, expected -> back.contentEquals(expected) },
+        change: (ByteArray) -> ByteArray?,
+    ): SettingWriteResult
 }
 
 /**
@@ -41,6 +50,11 @@ class LinkConnection(private val link: WatchLink) : WatchConnection {
 
     override suspend fun readFrame(code: Int): ByteArray? = link.rawSettings.readFrame(code)
 
-    override suspend fun modify(code: Int, touched: Set<Int>, change: (ByteArray) -> ByteArray?): SettingWriteResult =
-        link.rawSettings.modifySafe(code, touched, change)
+    override suspend fun modify(
+        code: Int,
+        touched: Set<Int>,
+        expectedBack: (before: ByteArray, written: ByteArray) -> ByteArray,
+        matches: (back: ByteArray, expected: ByteArray) -> Boolean,
+        change: (ByteArray) -> ByteArray?,
+    ): SettingWriteResult = link.rawSettings.modifySafe(code, touched, expectedBack, matches, change)
 }

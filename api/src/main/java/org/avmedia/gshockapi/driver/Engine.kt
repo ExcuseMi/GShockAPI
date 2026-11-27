@@ -18,6 +18,9 @@ class BoundWatch(val connection: WatchConnection, val driver: WatchDriver?) {
     suspend fun <T : Any> set(key: Key<T>, value: T): DriverResult<Unit> =
         driver?.set(connection, key, value) ?: DriverResult.Unsupported(key.id, "no driver for ${connection.name}")
 
+    /** The pure codec of the frame setting [key] of this watch's driver, null when it has none. */
+    fun frameSetting(key: Key<*>): FrameSetting? = (driver as? DataDriver)?.takeIf { has(key) }?.frameSetting(key.id)
+
     val events: Flow<WatchEvent> get() = driver?.events(connection) ?: emptyFlow()
 }
 
