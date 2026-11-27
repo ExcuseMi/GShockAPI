@@ -225,7 +225,7 @@ class WorkoutTransfer(
         // The one-minute walking laps (header offset 55) are read to keep the chain complete; they are not decoded yet.
         val minute = chain(h, CAT_LAPS, h.minuteLapAddress, h.minuteLapBytes) ?: throw Fail("workout in slot $slot: minute lap blocks could not be read")
         log("Workout read: slot $slot 20 ${laps.size} lap blocks, ${minute.size} minute lap blocks")
-        return WorkoutSessionBuilder.build(slot, h, data, laps)
+        return WorkoutSessionBuilder.build(slot, h, data, laps).also { WatchDataTap.workout(h, data, laps, it) }
     }
 
     /**

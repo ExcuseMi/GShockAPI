@@ -199,6 +199,7 @@ class LinkRawSettings internal constructor(private val watchLink: WatchLink) {
             )
         } else if (pending.accept(ints)) {
             pending.deferred.complete(ints)
+            WatchDataTap.setting(watchLink.watchInfo.name, ints)
         }
         // The connection setup and the button info wait for these codes too: the frame goes on to them as well.
         return !(ints[0] != 0xFF && ints[0] in org.avmedia.gshockapi.casio.ConnectionSetup.WATCHED_CODES)

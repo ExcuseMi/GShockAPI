@@ -247,7 +247,7 @@ object H5600HealthDecoder {
         return out.toByteArray().map { (it.toInt() xor 0xFF).toByte() }.toByteArray()
     }
 
-    private fun locateFrames(
+    internal fun locateFrames(
         stream: ByteArray,
         announcedLengths: Map<Int, Int>,
     ): Map<Int, IntRange> {

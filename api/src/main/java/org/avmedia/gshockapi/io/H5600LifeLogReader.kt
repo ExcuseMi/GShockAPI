@@ -364,6 +364,7 @@ class H5600LifeLogReader internal constructor(private val link: WatchLink, priva
                 "LifeLog read done: steps ${decoded.currentDaySteps} in %.1f s".format((System.currentTimeMillis() - requestStartedMs) / 1000.0),
             )
             // Workouts read before START are not read a second time after the LifeLog.
+            WatchDataTap.lifeLog(link.watchInfo.name, snapshot.first, snapshot.second, transfer.watchCondition, decoded)
             if (!workoutsRead) runCatching { afterRead(transfer.watchCondition) }.onFailure { Timber.w(it, "H5600: the step after the read failed") }
             return AttemptOutcome(decoded, restart = false)
         } finally {
@@ -411,6 +412,7 @@ class H5600LifeLogReader internal constructor(private val link: WatchLink, priva
         )
         val kept = if (blocks == 0) null else H5600HealthDecoder.decode(notifications, announced, transfer.zone, stepGoal, transfer.watchCondition)
         if (kept == null) return AttemptOutcome(StepCounterData.unavailable(), restart = true)
+        WatchDataTap.lifeLog(link.watchInfo.name, notifications, announced, transfer.watchCondition, kept)
         lastError = "The watch stopped answering during the LifeLog read. What it had sent is kept; the rest is read at the next read."
         org.avmedia.gshockapi.casio.ConnectionKeepAlive.log("LifeLog read stopped early: steps ${kept.currentDaySteps} from $blocks confirmed blocks, the rest stays on the watch")
         return AttemptOutcome(kept, restart = false)
