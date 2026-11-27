@@ -211,4 +211,32 @@ class LinkTimeTest {
         withTimeout(10_000) { one.await(); two.await() }
         assertEquals(2, gatt.writes().count { it.startsWith("w 09 ") })
     }
+
+    /** The reads the screens use: no answer ends them with an error instead of waiting for ever. */
+    @Test fun aPublicReadWithoutAnAnswerEndsWithAnError(): Unit = runBlocking {
+        val gatt = FakeGatt()
+        val a = readyLink(links, "A", gatt)
+        a.time.readLimitMs = 300
+        val started = System.currentTimeMillis()
+        for (read in listOf<suspend () -> String>(
+            { a.time.requestDstWatchState(IO.DstState.ZERO) },
+            { a.time.requestDstForWorldCities(0) },
+            { a.time.requestWorldCities(1) },
+            { a.time.requestHomeTime(0) },
+        )) {
+            val failed = runCatching { withTimeout(5_000) { read() } }.exceptionOrNull()
+            assertTrue("ended with $failed", failed is org.avmedia.gshockapi.io.TimeReadFailed)
+            assertTrue(failed!!.message.orEmpty(), failed.message.orEmpty().contains("no answer within"))
+        }
+        assertTrue(System.currentTimeMillis() - started < 5_000)
+    }
+
+    @Test fun aPublicReadWhoseRequestFailsEndsWithTheReason(): Unit = runBlocking {
+        val gatt = FakeGatt()
+        val a = readyLink(links, "A", gatt)
+        gatt.down = true // the write of the request fails
+        val failed = runCatching { withTimeout(5_000) { a.time.requestDstWatchState(IO.DstState.ZERO) } }.exceptionOrNull()
+        assertTrue("ended with $failed", failed is org.avmedia.gshockapi.io.TimeReadFailed)
+        assertTrue(failed!!.message.orEmpty(), failed.message.orEmpty().startsWith("read 1D00: "))
+    }
 }

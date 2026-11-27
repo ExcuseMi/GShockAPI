@@ -25,6 +25,9 @@ import java.util.TimeZone
 /** A time sync that did not get through: which read or write, and why. */
 class TimeSyncFailed(message: String) : Exception(message)
 
+/** A DST, world city or home time read that got no answer: the request failed or nothing came in time. */
+class TimeReadFailed(message: String) : Exception(message)
+
 @RequiresApi(Build.VERSION_CODES.O)
 class LinkTime internal constructor(private val link: WatchLink) {
     private data class Zone(
@@ -64,8 +67,22 @@ class LinkTime internal constructor(private val link: WatchLink) {
     /** The time zone this link writes, for the model-specific time code that needs more than the time (coordinates, DST rules). */
     val casioTimezone: CasioTimeZoneHelper.CasioTimeZone get() = zone.casioZone
 
+    /**
+     * A read for a screen or a value: it ends with [TimeReadFailed] when its request failed (no answer in 10 s, refused,
+     * the link gone) or nothing came within [readLimitMs]. Before, it waited for ever and the screen kept "reading".
+     */
     private suspend fun read(answer: LinkAnswer<String>, key: String): String =
-        link.cache.request(key) { k -> answer.ask { link.command(GetSetMode.GET, IOFunctional.toCasioCmd(k)) } }
+        link.cache.request(key) { k ->
+            kotlinx.coroutines.withTimeoutOrNull(readLimitMs) {
+                answer.askOrFail { fail ->
+                    val sent = link.command(GetSetMode.GET, IOFunctional.toCasioCmd(k))
+                    sent.invokeOnCompletion { failureOf(sent)?.let { fail(TimeReadFailed("read ${k.uppercase()}: $it")) } }
+                }
+            } ?: throw TimeReadFailed("read ${k.uppercase()}: no answer within ${readLimitMs / 1000} s").also { answer.fail(it) }
+        }
+
+    /** The longest a public time read waits, behind other jobs and for its answer; a test seam. */
+    @Volatile internal var readLimitMs: Long = 30_000L
 
     /**
      * A read of the time sync: when its request failed (no answer in 10 s, refused, the link gone) it ends with
