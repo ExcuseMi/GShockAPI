@@ -91,7 +91,7 @@
       "key": "alarms", "type": "records", "record_size": 4,
       "frames": [
         { "code": "0x15", "offset": 1, "count": 1 },
-        { "code": "0x16", "offset": 1, "count": 3, "verified": false, "note": "Written with 3 records (alarms 2 to 4); a read is expected to hold at least 16 value bytes, room for 4. Which is right on this family is not settled in the code." }
+        { "code": "0x16", "offset": 1, "count": 3, "note": "Alarms 2 to 4; the family has 4 alarms in all (owner, 2026-11-27)." }
       ],
       "fields": [
         { "name": "enabled", "type": "bool", "byte": 0, "mask": "0x40" },

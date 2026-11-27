@@ -136,7 +136,8 @@ suspend fun getAlarms(): ArrayList<Alarm> = ...
 
 1. Alarms: today's write sends whole new frames and never sets "one time" on alarm 1; the data path keeps unknown
    bits and writes per frame. Keep the old write until both are checked on a watch?
-2. 0x16 on this family: written with 3 records, read with room for 4. Which is right?
-3. Auto light polarity (bit set means off) is not confirmed on this family.
-4. Key ids: one shared list in the library (`Keys`), or free strings per driver with a few well-known ones?
-5. JSON or YAML, and should a data file be allowed to add a capability the library has no key for (shown as raw)?
+2. Auto light polarity (bit set means off) is not confirmed on this family.
+3. Should a data file be allowed to add a capability the library has no key for (shown as raw)?
+
+Settled (owner, 2026-11-27): the H5600 family has 4 alarms (1 in 0x15, 3 in 0x16, so 3 records written is right);
+data files are JSON; key ids are one shared list in the library (`Keys`), so apps and plugins use the same names.
