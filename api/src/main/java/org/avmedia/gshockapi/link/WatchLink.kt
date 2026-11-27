@@ -116,12 +116,16 @@ class WatchLink internal constructor(
         }
     }
 
+    /** How often this link dropped: what was started before a drop (a text in several chunks) sees that it is on another link now. */
+    @Volatile var drops: Int = 0
+        private set
+
     /** How long the setup's time write waits before its second try; a test seam. */
     @Volatile internal var timeRetryMs: Long = 3_000L
 
     /** One request or write as a command job (fire and forget unless the result is awaited). */
-    fun command(handle: GetSetMode, data: ByteArray): Deferred<JobOutcome<Outcome>> =
-        submit(JobSpec("%s 0x%02X".format(handle.name.lowercase(), (data.firstOrNull()?.toInt() ?: 0) and 0xFF), COMMANDS, JobPriority.COMMAND, settleMs = JobSpec.COMMAND_SETTLE_MS)) {
+    fun command(handle: GetSetMode, data: ByteArray, onDisconnect: OnDisconnect = OnDisconnect.WAIT): Deferred<JobOutcome<Outcome>> =
+        submit(JobSpec("%s 0x%02X".format(handle.name.lowercase(), (data.firstOrNull()?.toInt() ?: 0) and 0xFF), COMMANDS, JobPriority.COMMAND, onDisconnect = onDisconnect, settleMs = JobSpec.COMMAND_SETTLE_MS)) {
             exchange(handle, data)
         }
 
@@ -163,6 +167,7 @@ class WatchLink internal constructor(
 
     /** The link dropped (the watch may come back by itself): its jobs wait or end, the next `0x10` answer starts a new setup. */
     fun onGattLost() {
+        drops++
         jobs.linkDown("The link to the watch was closed.")
         connection.setup.onLinkLost()
         // A LifeLog read in progress ends with the link (it must not run its setup on the next one).

@@ -68,7 +68,8 @@ class LinkNotificationGate internal constructor() {
  * Sends a notification text to the watch of one link the way it accepts it: on the notification characteristic, without response, in chunks of
  * the MTU minus 4 bytes, the next chunk [spacingMs] after the write result of the one before, a failed write drops the rest, and
  * only while the watch allows it and no LifeLog or workout transfer runs (then the text is held back and sent after it). One text
- * at a time.
+ * at a time. A link that drops between two chunks: the whole text is sent once more on the next link, never only its rest
+ * (the watch showed the second half of a text alone); a second drop drops the text.
  */
 class LinkNotificationSender internal constructor(
     link: org.avmedia.gshockapi.link.WatchLink,
@@ -80,12 +81,23 @@ class LinkNotificationSender internal constructor(
     @Volatile var spacingMs = LongProcess.NOTIFICATION_TEXTS.chunkGapMs ?: 2_000L
 
     /** One write on the notification characteristic of this link; true when its write result came. */
-    @Volatile var writer: suspend (ByteArray) -> Boolean = { chunk ->
-        when (val out = link.command(GetSetMode.NOTIFY, chunk).await()) {
+    @Volatile var writer: suspend (ByteArray) -> Boolean = { chunk -> write(link, chunk, org.avmedia.gshockapi.link.OnDisconnect.WAIT) }
+
+    /**
+     * A chunk after the first: it ends with the link instead of waiting for the next one (it waited up to 3 minutes and
+     * went out there alone). A test that puts its own [writer] in gets that one for every chunk.
+     */
+    private val linkWriter = writer
+    private val laterWriter: suspend (ByteArray) -> Boolean = { chunk -> write(link, chunk, org.avmedia.gshockapi.link.OnDisconnect.CANCEL) }
+
+    private suspend fun write(link: org.avmedia.gshockapi.link.WatchLink, chunk: ByteArray, rule: org.avmedia.gshockapi.link.OnDisconnect): Boolean =
+        when (val out = link.command(GetSetMode.NOTIFY, chunk, rule).await()) {
             is JobOutcome.Done -> out.value.ok
             is JobOutcome.Failed -> false.also { ConnectionKeepAlive.log("notification chunk: ${out.detail}") }
         }
-    }
+
+    /** How often the link dropped so far ([org.avmedia.gshockapi.link.WatchLink.drops]); a test seam. */
+    @Volatile var linkDrops: () -> Int = { link.drops }
 
     @Volatile var holdLimitMs = 10 * 60_000L
 
@@ -104,7 +116,13 @@ class LinkNotificationSender internal constructor(
     fun send(buffer: ByteArray): Deferred<NotificationSender.Outcome> =
         scope.async {
             val outcome = mutex.withLock {
-                if (!awaitAllowed()) NotificationSender.Outcome.HELD_TOO_LONG else writePieces(buffer)
+                var sent = if (!awaitAllowed()) NotificationSender.Outcome.HELD_TOO_LONG else writePieces(buffer)
+                if (sent == null) {
+                    ConnectionKeepAlive.log("notification text: the link dropped between two chunks, the whole text is sent once more")
+                    sent = if (!awaitAllowed()) NotificationSender.Outcome.HELD_TOO_LONG else writePieces(buffer)
+                    if (sent == null) ConnectionKeepAlive.log("notification text: the link dropped again between two chunks")
+                }
+                sent ?: NotificationSender.Outcome.WRITE_FAILED
             }
             ConnectionKeepAlive.log(
                 when (outcome) {
@@ -131,12 +149,21 @@ class LinkNotificationSender internal constructor(
         return true
     }
 
-    /** The text in chunks, [spacingMs] apart; a failed chunk drops the rest. */
-    private suspend fun writePieces(buffer: ByteArray): NotificationSender.Outcome {
+    /**
+     * The text in chunks, [spacingMs] apart; a failed chunk drops the rest. Null: the link dropped after the first chunk
+     * went out, so the rest was not sent (on the next link it would arrive without its start).
+     */
+    private suspend fun writePieces(buffer: ByteArray): NotificationSender.Outcome? {
         val pieces = chunks(buffer, gate.chunkSize())
         if (pieces.isEmpty()) return NotificationSender.Outcome.EMPTY
+        var drops = 0
         for ((i, piece) in pieces.withIndex()) {
-            if (!writer(piece)) {
+            if (i > 0 && linkDrops() != drops) return null
+            val write = if (i > 0 && writer === linkWriter) laterWriter else writer
+            val ok = write(piece)
+            // The first chunk may have waited for the link: the count is taken once it went out.
+            if (i == 0) drops = linkDrops() else if (linkDrops() != drops) return null
+            if (!ok) {
                 Timber.w("Notification text: chunk ${i + 1} of ${pieces.size} failed, the rest is dropped")
                 return NotificationSender.Outcome.WRITE_FAILED
             }
