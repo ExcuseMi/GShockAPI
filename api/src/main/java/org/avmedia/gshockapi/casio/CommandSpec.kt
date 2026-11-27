@@ -48,6 +48,13 @@ data class ReadSpec(
     val fixedOption: Int? = null,
     val minValue: Int = 0,
     val matchOptions: Int = 0,
+    /**
+     * The option bytes a watch can answer with. An answer with this code and an option outside them ends the read, as
+     * failed: it answers no read at all. The DW-H5600 family answers a world city slot it does not have (`1F 02` and
+     * up) with `1F 6D 03 20 ...`: the read waited its whole 10 s for a frame that had already come, and every request
+     * behind it waited too. An answer for another slot inside the range is not this read's and does not end it.
+     */
+    val slots: IntRange? = null,
 )
 
 /** A write frame: code + value, on [channel], cut to [CommandTable.FRAME_CUT] bytes. */
@@ -115,7 +122,7 @@ object CommandTable {
             rw(0x18, "timer", ReadSpec(minValue = 6)),
             rw(0x1D, "dst watch state", ReadSpec(options = 0..1, matchOptions = 1), process = LongProcess.TIME_EXCHANGE),
             rw(0x1E, "dst for world cities", ReadSpec(options = 0..1, matchOptions = 1), process = LongProcess.TIME_EXCHANGE),
-            rw(0x1F, "world city name", ReadSpec(options = ONE, matchOptions = 1), process = LongProcess.TIME_EXCHANGE),
+            rw(0x1F, "world city name", ReadSpec(options = ONE, matchOptions = 1, slots = 0..5), process = LongProcess.TIME_EXCHANGE),
             readOnly(0x20, "version information", process = LongProcess.UPDATE_CHECK),
             rw(0x22, "app information", ReadSpec(minValue = 11)),
             rw(0x23, "watch name"),
@@ -198,6 +205,13 @@ object CommandTable {
         val compare = minOf(spec?.read?.matchOptions ?: 0, request.size - 1)
         for (i in 1..compare) if (answer.size <= i || answer[i] != request[i]) return false
         return true
+    }
+
+    /** True when [answer] has the code of [request] and an option byte no slot of that code has ([ReadSpec.slots]). */
+    fun endsUnanswered(request: ByteArray, answer: ByteArray): Boolean {
+        if (request.size < 2 || answer.size < 2 || request[0] != answer[0]) return false
+        val slots = byCode[request[0].toInt() and 0xFF]?.read?.slots ?: return false
+        return (answer[1].toInt() and 0xFF) !in slots && !matches(request, answer)
     }
 
     /**

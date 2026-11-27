@@ -224,4 +224,37 @@ class WatchQueueTest {
         queue.clear("test over")
         assertFalse(read.await().ok)
     }
+
+    /** Seen on a GBX-H5600: `1F 02` and up are answered `1F 6D 03 20 ...`, and each such read held the queue 10 s. */
+    @Test fun aWorldCityAnswerThatNamesNoSlotEndsTheReadAtOnceAsFailed() = runBlocking {
+        val read = queue.enqueue(GetSetMode.GET, b(0x1F, 0x02))
+        val write = queue.enqueue(GetSetMode.SET, b(0x13, 1))
+        waitFor("the read request") { sentCodes() == listOf(0x1F) }
+        val started = System.currentTimeMillis()
+        queue.onNotification(allFeatures, b(0x1F, 0x6D, 0x03, 0x20, 0xAA, 0x6D, 0x03, 0x20, 0x06, 0x00))
+        val out = read.await()
+        assertFalse(out.ok)
+        assertTrue(out.reason.orEmpty(), out.reason.orEmpty().contains("no value in this slot"))
+        assertTrue(write.await().ok)
+        assertTrue("the queue went on at once", System.currentTimeMillis() - started < 300)
+    }
+
+    @Test fun aWorldCityAnswerForTheAskedSlotIsStillTheAnswer() = runBlocking {
+        val read = queue.enqueue(GetSetMode.GET, b(0x1F, 0x01))
+        waitFor("the read request") { sentCodes() == listOf(0x1F) }
+        queue.onNotification(allFeatures, b(0x1F, 0x01, 0x20, 0x20, 0x20))
+        assertTrue(read.await().ok)
+    }
+
+    /** Other families keep the wait: only the DW-H5600 family is known to answer this way. */
+    @Test fun anotherFamilyStillWaitsForTheAskedSlot() = runBlocking {
+        val other = WatchQueue(scope, transport, readTimeoutMs = 300, layouts = { false })
+        val read = other.enqueue(GetSetMode.GET, b(0x1F, 0x02))
+        waitFor("the read request") { sentCodes() == listOf(0x1F) }
+        other.onNotification(allFeatures, b(0x1F, 0x6D, 0x03))
+        delay(100)
+        assertFalse(read.isCompleted)
+        other.onNotification(allFeatures, b(0x1F, 0x02, 0x41))
+        assertTrue(read.await().ok)
+    }
 }
