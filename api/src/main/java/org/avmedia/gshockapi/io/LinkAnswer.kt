@@ -20,6 +20,20 @@ internal class LinkAnswer<T> {
         return deferred.await()
     }
 
+    /**
+     * As [ask], and [send] gets a way to end this very read with an error (its request failed: no answer, refused, the
+     * link gone). Without it a read whose request failed waited for ever, and with it everything after it.
+     */
+    suspend fun askOrFail(send: (fail: (Throwable) -> Unit) -> Unit): T {
+        val deferred = CompletableDeferred<T>()
+        synchronized(this) { pending = deferred }
+        send { error ->
+            synchronized(this) { if (pending === deferred) pending = null }
+            deferred.completeExceptionally(error)
+        }
+        return deferred.await()
+    }
+
     fun complete(value: T) = end { it.complete(value) }
 
     fun fail(error: Throwable) = end { it.completeExceptionally(error) }

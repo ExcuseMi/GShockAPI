@@ -105,10 +105,19 @@ class WatchLink internal constructor(
         // The end of the setup writes this watch's own time and DST values.
         connection.setup.timeWriter = {
             scope.launch {
-                runCatching { time.set() }.onFailure { ConnectionKeepAlive.log("time write failed: ${it.message}") }
+                // One more try when a read or the write did not get through and the watch is still there.
+                for (attempt in 1..TIME_WRITE_TRIES) {
+                    val failed = runCatching { time.set() }.exceptionOrNull() ?: break
+                    ConnectionKeepAlive.log("time write failed (try $attempt of $TIME_WRITE_TRIES): ${failed.message}")
+                    if (attempt == TIME_WRITE_TRIES || state.value != LinkState.READY) break
+                    kotlinx.coroutines.delay(timeRetryMs)
+                }
             }
         }
     }
+
+    /** How long the setup's time write waits before its second try; a test seam. */
+    @Volatile internal var timeRetryMs: Long = 3_000L
 
     /** One request or write as a command job (fire and forget unless the result is awaited). */
     fun command(handle: GetSetMode, data: ByteArray): Deferred<JobOutcome<Outcome>> =
@@ -165,6 +174,9 @@ class WatchLink internal constructor(
 
     internal fun close() = jobs.close("The link to the watch was closed.")
 }
+
+/** The setup's time write: the first try and one more. */
+private const val TIME_WRITE_TRIES = 2
 
 /** The source of the link's own commands (the setup, the keep-alive and the single-watch API): one source, first asked first run. */
 private val COMMANDS = JobSource.System("single-watch API")

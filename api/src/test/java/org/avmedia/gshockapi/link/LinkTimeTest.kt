@@ -141,4 +141,74 @@ class LinkTimeTest {
         waitUntil("A's time written after its setup", 10_000) { gattA.writes().any { it.startsWith("w 09 ") } }
         assertEquals(emptyList<String>(), gattB.writes())
     }
+
+    private val reports = java.util.concurrent.CopyOnWriteArrayList<String>()
+
+    private fun hearReports() {
+        org.avmedia.gshockapi.log.SyncReport.sink = org.avmedia.gshockapi.log.SyncReportSink { kind, ok, _, detail -> reports += "$kind $ok ${detail.orEmpty()}".trim() }
+    }
+
+    @After fun noSink() { org.avmedia.gshockapi.log.SyncReport.sink = null }
+
+    /** [gatt] plays a watch that refuses the read [refused] (`FF 81`) the first [times] times and answers the others. */
+    private fun watchRefusing(link: WatchLink, gatt: FakeGatt, refused: String, times: Int = Int.MAX_VALUE) {
+        val left = java.util.concurrent.atomic.AtomicInteger(times)
+        gatt.onWrite = { frame ->
+            val code = frame[0].toInt() and 0xFF
+            val reply = replies[code]
+            if (frame.size == 2 && reply != null) {
+                val asked = frame.joinToString(" ") { "%02X".format(it) }
+                val hex = if (asked == refused && left.getAndDecrement() > 0) "FF 81" else reply.format(frame[1].toInt() and 0xFF)
+                watches.launch { delay(5); answer(link, hex) }
+            }
+        }
+    }
+
+    /** A read the watch refuses (or never answers) ended nothing: the sync waited for ever and the time was never written. */
+    @Test fun aTimeSyncWhoseReadFailsEndsWithTheReasonAndIsReported(): Unit = runBlocking {
+        hearReports()
+        val gatt = FakeGatt()
+        val a = readyLink(links, "A", gatt)
+        watchRefusing(a, gatt, "1E 01")
+        val failed = runCatching { withTimeout(10_000) { a.time.set(timeMs = 0L) } }.exceptionOrNull()
+        assertTrue("ended with $failed", failed is org.avmedia.gshockapi.io.TimeSyncFailed)
+        assertTrue(failed!!.message, failed.message!!.startsWith("read 1E01: The watch refused the read"))
+        assertFalse("no time written after a failed read", gatt.writes().any { it.startsWith("w 09 ") })
+        assertEquals(1, reports.size)
+        assertTrue(reports.toString(), reports[0].startsWith("time false read 1E01"))
+    }
+
+    @Test fun aTimeSyncThatReachedTheWatchIsReportedOnce(): Unit = runBlocking {
+        hearReports()
+        val gatt = FakeGatt()
+        val a = readyLink(links, "A", gatt)
+        watch(a, gatt)
+        withTimeout(10_000) { a.time.set(timeMs = 0L) }
+        assertTrue("the time write's result is in when the sync ends", gatt.writes().any { it.startsWith("w 09 ") })
+        assertEquals(listOf("time true"), reports.toList())
+    }
+
+    /** The setup's time write tries once more when a read failed and the watch is still there. */
+    @Test fun theSetupsTimeWriteTriesOnceMoreAfterAFailedRead(): Unit = runBlocking {
+        hearReports()
+        val gatt = FakeGatt()
+        val a = readyLink(links, "A", gatt)
+        a.timeRetryMs = 20
+        watchRefusing(a, gatt, "1D 00", times = 1)
+        a.connection.setup.timeWriter()
+        waitUntil("the time written at the second try", 10_000) { gatt.writes().any { it.startsWith("w 09 ") } }
+        waitUntil("both tries reported") { reports.size == 2 }
+        assertTrue(reports.toString(), reports[0].startsWith("time false") && reports[1] == "time true")
+    }
+
+    /** Two syncs asked together (the setup's and the app's at a connection) run one after the other, both to the end. */
+    @Test fun twoTimeSyncsAtOnceBothEnd(): Unit = runBlocking {
+        val gatt = FakeGatt()
+        val a = readyLink(links, "A", gatt)
+        watch(a, gatt)
+        val one = async { a.time.set(timeMs = 0L) }
+        val two = async { a.time.set(timeMs = 0L) }
+        withTimeout(10_000) { one.await(); two.await() }
+        assertEquals(2, gatt.writes().count { it.startsWith("w 09 ") })
+    }
 }
