@@ -6,6 +6,7 @@ import androidx.annotation.RequiresApi
 import org.avmedia.gshockapi.ble.GetSetMode
 import org.avmedia.gshockapi.casio.CasioConstants
 import org.avmedia.gshockapi.casio.CasioTimeZoneHelper
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import org.avmedia.gshockapi.casio.Outcome
@@ -131,17 +132,22 @@ class LinkTime internal constructor(private val link: WatchLink) {
         val started = System.currentTimeMillis()
         try {
             setLock.withLock {
-                writeDST()
-                writeDSTForWorldCities()
-                val info = link.watchInfo.info
-                if (info.hasWorldCities) {
-                    writeWorldCities()
-                } else if (info.hasHomeTime) {
-                    writeHomeTimes()
+                kotlinx.coroutines.coroutineScope {
+                    // The app's clock gets ready (a network time that went stale) while the watch answers the reads.
+                    val clockReady = if (timeMs == null) launch { prepareClock() } else null
+                    writeDST()
+                    writeDSTForWorldCities()
+                    val info = link.watchInfo.info
+                    if (info.hasWorldCities) {
+                        writeWorldCities()
+                    } else if (info.hasHomeTime) {
+                        writeHomeTimes()
+                    }
+                    clockReady?.join()
+                    val written = if (timeMs != null) writeTime(timeMs) else writeTimeOnSecond { WatchClock.now() + (offset ?: 0L) }
+                    written.await()
+                    failureOf(written)?.let { throw TimeSyncFailed("time write: $it") }
                 }
-                val written = writeTime(timeMs ?: (Clock.systemDefaultZone().millis() + (offset ?: 0L)))
-                written.await()
-                failureOf(written)?.let { throw TimeSyncFailed("time write: $it") }
             }
         } catch (e: kotlinx.coroutines.CancellationException) {
             throw e
@@ -152,14 +158,56 @@ class LinkTime internal constructor(private val link: WatchLink) {
         SyncReport.report(SyncReport.TIME, true, System.currentTimeMillis() - started, null)
     }
 
+    /** A clock that fails to get ready never keeps the time from being written: the clock then gives what it has. */
+    private suspend fun prepareClock() {
+        try {
+            WatchClock.prepare()
+        } catch (e: kotlinx.coroutines.CancellationException) {
+            throw e
+        } catch (e: Throwable) {
+            Timber.w("Time sync: the clock was not made ready (%s)", e.javaClass.simpleName)
+        }
+    }
+
+    /** How long this watch takes to acknowledge a write, measured on this sync's own writes: the lead of the time write. */
+    val lead = WriteLead()
+
     /** The time write (`09 ...`) of [timeMs] in this link's time zone; its result says whether it reached the watch. */
     fun writeTime(timeMs: Long): kotlinx.coroutines.Deferred<JobOutcome<Outcome>> {
         val adjusted = TimeIOFunctional.adjustTimeForDSTAndConvert(timeMs, zone.casioZone)
         return link.command(GetSetMode.SET, TimeIOFunctional.buildTimeCommand(adjusted))
     }
 
+    /**
+     * The time write of the clock [now], compensated for the way to the watch. The frame is made when its turn comes
+     * (asked behind the DST and city writes, it once carried the time of the asking), stamped [lead] ahead and sent so
+     * that it lands on a whole second ([stampOnSecond]): the frame's fraction is then zero, which is right whether the
+     * watch applies the fraction or starts its second at the frame. The date and time are those of the instant in this
+     * link's zone as they are (nothing is added in summer time: the zone's rules already hold it). A write that got
+     * through is told to [WatchClock.written].
+     */
+    fun writeTimeOnSecond(now: () -> Long): kotlinx.coroutines.Deferred<JobOutcome<Outcome>> {
+        var stamp: TimeStamp? = null
+        var leadMs = 0L
+        var ackMs: Long? = null
+        val sent = link.command(GetSetMode.SET, CasioConstants.CHARACTERISTICS.CASIO_CURRENT_TIME.code, onAck = { ackMs = it; lead.add(it) }) {
+            leadMs = lead.ms()
+            val s = stampOnSecond(now, leadMs).also { stamp = it }
+            TimeIOFunctional.buildTimeCommand(java.time.LocalDateTime.ofInstant(java.time.Instant.ofEpochMilli(s.ms), zone.casioZone.zoneId))
+        }
+        sent.invokeOnCompletion {
+            val s = stamp ?: return@invokeOnCompletion
+            if (failureOf(sent) == null) {
+                runCatching { WatchClock.written?.invoke(TimeWrite(link.key, s.ms, leadMs, s.onSecond, ackMs)) }
+            }
+        }
+        return sent
+    }
+
+    /** A write of this sync; how long the watch took to acknowledge it feeds [lead]. */
     private fun write(value: String) {
-        link.command(GetSetMode.SET, IOFunctional.toCasioCmd(Utils.toCompactString(value)))
+        val data = IOFunctional.toCasioCmd(Utils.toCompactString(value))
+        link.command(GetSetMode.SET, data.firstOrNull()?.toInt() ?: 0, onAck = lead::add) { data }
     }
 
     suspend fun writeDST() {

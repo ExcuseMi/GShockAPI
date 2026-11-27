@@ -212,6 +212,60 @@ class LinkTimeTest {
         assertEquals(2, gatt.writes().count { it.startsWith("w 09 ") })
     }
 
+    /**
+     * A sync without a given time reads [org.avmedia.gshockapi.io.WatchClock]: the clock is made ready first, the frame
+     * is stamped when its turn comes, a whole second (fraction 00), and the write is told with its lead.
+     */
+    @Test fun aSyncOfTheClockLandsOnAWholeSecondAndIsTold(): Unit = runBlocking {
+        val clock = org.avmedia.gshockapi.io.WatchClock
+        val told = java.util.concurrent.CopyOnWriteArrayList<org.avmedia.gshockapi.io.TimeWrite>()
+        val prepared = java.util.concurrent.atomic.AtomicInteger()
+        // 2026-11-27 13:03:26.400 UTC plus the time since the test started; Tokyo is nine hours ahead and has no summer time.
+        val base = 1_795_784_606_400L - System.currentTimeMillis()
+        clock.now = { System.currentTimeMillis() + base }
+        clock.prepare = { prepared.incrementAndGet(); delay(20) }
+        clock.written = { told += it }
+        try {
+            val gatt = FakeGatt(writeMs = 40)
+            val a = readyLink(links, "A", gatt)
+            watch(a, gatt)
+            a.time.setTimezone("Asia/Tokyo")
+            withTimeout(15_000) { a.time.set(offset = 60_000L) }
+            assertEquals(1, prepared.get())
+            val frame = gatt.writes().single { it.startsWith("w 09 ") }.removePrefix("w ").split(" ").map { it.toInt(16) }
+            assertEquals("no fraction: sent to land on the second", 0, frame[9])
+            assertEquals(listOf(0xEA, 0x07, 11, 27, 22, 4), frame.subList(1, 7))
+            waitUntil("the write told") { told.isNotEmpty() }
+            val write = told.single()
+            assertEquals("A", write.watch)
+            assertTrue(write.toString(), write.onSecond && write.setToMs % 1000 == 0L)
+            assertEquals("the caller's offset is in the stamped time", frame[7], java.time.Instant.ofEpochMilli(write.setToMs).atZone(java.time.ZoneId.of("Asia/Tokyo")).second)
+            // The writes of this sync took 40 ms or more each: the lead is a quarter of that.
+            assertTrue(write.toString(), write.leadMs in 10..100)
+            assertTrue(write.toString(), (write.ackMs ?: 0) >= 40)
+        } finally {
+            clock.now = System::currentTimeMillis
+            clock.prepare = {}
+            clock.written = null
+        }
+    }
+
+    /** A clock that cannot be made ready (no network) does not keep the time from being written. */
+    @Test fun aClockThatFailsToGetReadyStillWritesTheTime(): Unit = runBlocking {
+        org.avmedia.gshockapi.io.WatchClock.prepare = { error("no network") }
+        try {
+            hearReports()
+            val gatt = FakeGatt()
+            val a = readyLink(links, "A", gatt)
+            watch(a, gatt)
+            withTimeout(15_000) { a.time.set() }
+            assertTrue(gatt.writes().any { it.startsWith("w 09 ") })
+            assertEquals(listOf("time true"), reports.toList())
+        } finally {
+            org.avmedia.gshockapi.io.WatchClock.prepare = {}
+        }
+    }
+
     /** The reads the screens use: no answer ends them with an error instead of waiting for ever. */
     @Test fun aPublicReadWithoutAnAnswerEndsWithAnError(): Unit = runBlocking {
         val gatt = FakeGatt()

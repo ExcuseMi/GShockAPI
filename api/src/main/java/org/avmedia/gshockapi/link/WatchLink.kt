@@ -129,6 +129,17 @@ class WatchLink internal constructor(
             exchange(handle, data)
         }
 
+    /**
+     * [command] for a frame that is made when its turn comes ([frame] may wait: a time is stamped right before it goes
+     * out, not when it was asked behind other writes). [onAck] hears how long a write that got through took.
+     */
+    fun command(handle: GetSetMode, code: Int, onAck: (Long) -> Unit = {}, frame: suspend () -> ByteArray): Deferred<JobOutcome<Outcome>> =
+        submit(JobSpec("%s 0x%02X".format(handle.name.lowercase(), code and 0xFF), COMMANDS, JobPriority.COMMAND, settleMs = JobSpec.COMMAND_SETTLE_MS)) {
+            val data = frame()
+            val start = System.nanoTime()
+            exchange(handle, data).also { if (it.ok) onAck((System.nanoTime() - start) / 1_000_000L) }
+        }
+
     /** Extra steps of the setup after the subscriptions (protocol reads and writes), run inside the setup job. */
     @Volatile var protocolSetup: suspend JobScope.() -> Unit = {}
 
