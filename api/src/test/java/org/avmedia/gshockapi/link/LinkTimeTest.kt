@@ -239,4 +239,91 @@ class LinkTimeTest {
         assertTrue("ended with $failed", failed is org.avmedia.gshockapi.io.TimeReadFailed)
         assertTrue(failed!!.message.orEmpty(), failed.message.orEmpty().startsWith("read 1D00: "))
     }
+
+    /**
+     * [gatt] plays a watch whose answer to the read [lost] reaches the queue but not the time routes (as when another
+     * read took it), and that answers [slow] only after [slowMs].
+     */
+    private fun watchLosing(link: WatchLink, gatt: FakeGatt, lost: String, slow: String? = null, slowMs: Long = 0) {
+        gatt.onWrite = { frame ->
+            val reply = replies[frame[0].toInt() and 0xFF]
+            if (frame.size == 2 && reply != null) {
+                val asked = frame.joinToString(" ") { "%02X".format(it) }
+                val hex = reply.format(frame[1].toInt() and 0xFF)
+                watches.launch {
+                    delay(if (asked == slow) slowMs else 5)
+                    if (asked == lost) {
+                        link.onNotification(CasioConstants.CASIO_ALL_FEATURES_CHARACTERISTIC_UUID, SingleWatchLink.parseHex(hex))
+                    } else {
+                        answer(link, hex)
+                    }
+                }
+            }
+        }
+    }
+
+    /** Two reads of one register asked together shared one place: the first answer went to the last asker, the other waited for ever. */
+    @Test fun readsOfOneRegisterAtOnceEachGetTheirOwnAnswer(): Unit = runBlocking {
+        val gatt = FakeGatt()
+        val a = readyLink(links, "A", gatt)
+        watch(a, gatt)
+        a.time.readLimitMs = 4_000
+        repeat(3) {
+            a.cache.clear()
+            val reads = (1..4).map { slot -> async(Dispatchers.Default) { a.time.requestWorldCities(slot) } }
+            val got = withTimeout(10_000) { reads.map { it.await() } }
+            assertEquals((1..4).map { replies.getValue(0x1F).format(it) }, got)
+        }
+    }
+
+    /** A sync read whose answer never came held the sync, and with it every later sync, until the app restarted. */
+    @Test fun aTimeSyncWhoseAnswerIsLostEndsAndTheNextSyncRuns(): Unit = runBlocking {
+        hearReports()
+        val gatt = FakeGatt()
+        val a = readyLink(links, "A", gatt)
+        a.time.syncReadLimitMs = 300
+        watchLosing(a, gatt, lost = "1E 01")
+        val first = async(Dispatchers.Default) { runCatching { a.time.set(timeMs = 0L) }.exceptionOrNull() }
+        val failed = withTimeout(8_000) { first.await() }
+        assertTrue("ended with $failed", failed is org.avmedia.gshockapi.io.TimeSyncFailed)
+        assertTrue(failed!!.message, failed.message!!.startsWith("read 1E01: no answer within"))
+        assertFalse("no time written after a lost answer", gatt.writes().any { it.startsWith("w 09 ") })
+
+        watch(a, gatt)
+        withTimeout(8_000) { a.time.set(timeMs = 0L) }
+        assertTrue("the next sync wrote the time", gatt.writes().any { it.startsWith("w 09 ") })
+        assertTrue(reports.toString(), reports[0].startsWith("time false read 1E01") && reports[1] == "time true")
+    }
+
+    /** The setup's sync and a screen's reads of the same register at once: all end, the sync writes the time. */
+    @Test fun aTimeSyncAndPublicReadsOfTheSameRegisterAllEnd(): Unit = runBlocking {
+        val gatt = FakeGatt()
+        val a = readyLink(links, "A", gatt)
+        watch(a, gatt)
+        a.time.readLimitMs = 4_000
+        a.time.syncReadLimitMs = 4_000
+        repeat(3) {
+            a.cache.clear()
+            val sync = async(Dispatchers.Default) { a.time.set(timeMs = 0L) }
+            val reads = (0..5).map { slot -> async(Dispatchers.Default) { a.time.requestDstForWorldCities(slot) } }
+            withTimeout(15_000) { sync.await(); reads.forEach { it.await() } }
+        }
+        assertEquals(3, gatt.writes().count { it.startsWith("w 09 ") })
+    }
+
+    /** A public read's time limit failed whichever read waited on the same answer then, not itself. */
+    @Test fun aPublicReadsTimeLimitDoesNotFailAnotherRead(): Unit = runBlocking {
+        val gatt = FakeGatt()
+        val a = readyLink(links, "A", gatt)
+        watchLosing(a, gatt, lost = "1F 01", slow = "1F 02", slowMs = 800)
+        a.time.readLimitMs = 400
+        val first = async(Dispatchers.Default) { runCatching { a.time.requestWorldCities(1) }.exceptionOrNull() }
+        waitUntil("1F 01 asked") { gatt.writes().contains("w 1F 01") }
+        a.time.readLimitMs = 8_000
+        val second = async(Dispatchers.Default) { runCatching { a.time.requestWorldCities(2) } }
+        assertEquals(replies.getValue(0x1F).format(2), withTimeout(10_000) { second.await() }.getOrThrow())
+        val failed = first.await()
+        assertTrue("ended with $failed", failed is org.avmedia.gshockapi.io.TimeReadFailed)
+        assertTrue(failed!!.message.orEmpty(), failed.message.orEmpty().startsWith("read 1F01: no answer within"))
+    }
 }

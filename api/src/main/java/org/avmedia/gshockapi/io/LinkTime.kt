@@ -70,6 +70,7 @@ class LinkTime internal constructor(private val link: WatchLink) {
     /**
      * A read for a screen or a value: it ends with [TimeReadFailed] when its request failed (no answer in 10 s, refused,
      * the link gone) or nothing came within [readLimitMs]. Before, it waited for ever and the screen kept "reading".
+     * Its time limit ends only this read: it once failed whichever read waited on the same answer at that moment.
      */
     private suspend fun read(answer: LinkAnswer<String>, key: String): String =
         link.cache.request(key) { k ->
@@ -78,22 +79,28 @@ class LinkTime internal constructor(private val link: WatchLink) {
                     val sent = link.command(GetSetMode.GET, IOFunctional.toCasioCmd(k))
                     sent.invokeOnCompletion { failureOf(sent)?.let { fail(TimeReadFailed("read ${k.uppercase()}: $it")) } }
                 }
-            } ?: throw TimeReadFailed("read ${k.uppercase()}: no answer within ${readLimitMs / 1000} s").also { answer.fail(it) }
+            } ?: throw TimeReadFailed("read ${k.uppercase()}: no answer within ${readLimitMs / 1000} s")
         }
 
     /** The longest a public time read waits, behind other jobs and for its answer; a test seam. */
     @Volatile internal var readLimitMs: Long = 30_000L
 
+    /** The longest a read of the time sync waits, behind other reads of the same register and for its answer; a test seam. */
+    @Volatile internal var syncReadLimitMs: Long = 30_000L
+
     /**
-     * A read of the time sync: when its request failed (no answer in 10 s, refused, the link gone) it ends with
-     * [TimeSyncFailed]. Before, it waited for ever, the time was never written on that link and no line said so.
+     * A read of the time sync: when its request failed (no answer in 10 s, refused, the link gone) or nothing came
+     * within [syncReadLimitMs] it ends with [TimeSyncFailed]. Before, it waited for ever, the time was never written on
+     * that link, no line said so and every later sync waited behind it.
      */
     private suspend fun syncRead(answer: LinkAnswer<String>, key: String): String =
         link.cache.request(key) { k ->
-            answer.askOrFail { fail ->
-                val sent = link.command(GetSetMode.GET, IOFunctional.toCasioCmd(k))
-                sent.invokeOnCompletion { failureOf(sent)?.let { fail(TimeSyncFailed("read ${k.uppercase()}: $it")) } }
-            }
+            kotlinx.coroutines.withTimeoutOrNull(syncReadLimitMs) {
+                answer.askOrFail { fail ->
+                    val sent = link.command(GetSetMode.GET, IOFunctional.toCasioCmd(k))
+                    sent.invokeOnCompletion { failureOf(sent)?.let { fail(TimeSyncFailed("read ${k.uppercase()}: $it")) } }
+                }
+            } ?: throw TimeSyncFailed("read ${k.uppercase()}: no answer within ${syncReadLimitMs / 1000} s")
         }
 
     /** Why a command did not get through, null when it did. */
