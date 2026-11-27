@@ -86,12 +86,27 @@ class ConnectionSetup internal constructor(private val keepAlive: ConnectionKeep
      * Chosen over running the setup first: the transfer already holds the exchange lock when the `0x10` answer arrives.
      */
     fun onTransferEnded() {
-        val data = deferredKind ?: return
         if (busy()) return
-        deferredKind = null
-        ConnectionKeepAlive.log("transfer ended: deferred setup starts")
-        onKind(data)
+        val data = deferredKind
+        if (data != null) {
+            // The deferred setup reads `0x39` itself: a value held from before it is not answered twice.
+            deferredKind = null
+            deferredTime = null
+            ConnectionKeepAlive.log("transfer ended: deferred setup starts")
+            onKind(data)
+            return
+        }
+        val time = deferredTime ?: return
+        deferredTime = null
+        ConnectionKeepAlive.log("transfer ended: the held 39 value is answered")
+        on39(time)
     }
+
+    /**
+     * The last `39` value the watch sent while a transfer was active; answered by [onTransferEnded]. Only the last one
+     * is kept: each value replaces the one before in the exchange. Before, it was dropped and the watch never got its time.
+     */
+    @Volatile private var deferredTime: String? = null
 
     /** The kind of the last `0x10` answer of this link, noted before anything is deferred or skipped. */
     @Volatile var lastKind: Int? = null
@@ -152,6 +167,7 @@ class ConnectionSetup internal constructor(private val keepAlive: ConnectionKeep
         lastKind = null
         runCatching { onReset() }
         deferredKind = null
+        deferredTime = null
         step = Step.WAIT_KIND
         reconnectKind = false
         workoutsOffered = false
@@ -276,8 +292,13 @@ class ConnectionSetup internal constructor(private val keepAlive: ConnectionKeep
 
     /** The watch's `39` value (read at setup, and whenever it notifies again). Kinds 13 and 14 only. */
     fun on39(data: String) {
-        if (!selfConnect || busy()) return
+        if (!selfConnect) return
         val value = bytes(data).getOrNull(1) ?: return
+        if (busy()) {
+            deferredTime = data
+            ConnectionKeepAlive.log("39 %02X received during a transfer: answered when it ends".format(value))
+            return
+        }
         ConnectionKeepAlive.log("39 %02X received".format(value))
         when (value) {
             0 -> if (timeChangeAllowed()) answer(3) else answer(5)

@@ -205,4 +205,49 @@ class ConnectionKeepAliveTest {
         singleSetup.onTransferEnded()
         assertTrue(fake.requests.isEmpty())
     }
+
+    @Test fun aTimeRequestDuringATransferIsAnsweredWhenItEnds() {
+        kindFourteenUpTo39()
+        receive("0x28 00 00 00 00 00 00 00 00 00")
+        receive("0x39 04")
+        val before = fake.all.size
+        singleSetup.busy = { true }
+        receive("0x39 04")
+        receive("0x39 00") // the last value is the one answered
+        assertEquals("nothing is written during the transfer", before, fake.all.size)
+        assertTrue(TestLog.recentEvents().last().endsWith("39 00 received during a transfer: answered when it ends"))
+        singleSetup.onTransferEnded() // an attempt ended, the next transfer already runs: still held
+        assertEquals(before, fake.all.size)
+        singleSetup.busy = { false }
+        singleSetup.onTransferEnded()
+        assertEquals(listOf(0x39, 0x03), fake.all.last())
+        assertEquals(before + 1, fake.all.size)
+        singleSetup.onTransferEnded() // answered once
+        assertEquals(before + 1, fake.all.size)
+        receive("0x39 02")
+        assertEquals(1, timeWrites)
+    }
+
+    @Test fun aLostLinkDropsAHeldTimeRequest() {
+        kindFourteenUpTo39()
+        receive("0x39 04")
+        val before = fake.all.size
+        singleSetup.busy = { true }
+        receive("0x39 00")
+        singleSetup.onLinkLost()
+        singleSetup.busy = { false }
+        singleSetup.onTransferEnded()
+        assertEquals(before, fake.all.size)
+    }
+
+    @Test fun aDeferredSetupReadsTheTimeValueItselfSoAHeldOneIsNotAnsweredTwice() {
+        singleSetup.reset()
+        singleSetup.busy = { true }
+        receive("0x10 00 00 00 00 00 00 00 0E 00")
+        receive("0x39 00") // before the setup ran: not ours to answer yet
+        singleSetup.busy = { false }
+        singleSetup.onTransferEnded()
+        assertEquals(listOf(0x23), fake.requests)
+        assertTrue(fake.all.isEmpty())
+    }
 }
