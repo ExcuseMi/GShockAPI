@@ -52,6 +52,9 @@ class H5600LifeLogReader internal constructor(private val link: WatchLink, priva
         /** While the outbox is empty the job looks this often whether a more urgent job waits. */
         private const val IDLE_TURN_MS = 200L
 
+        /** A yield that took this long ran another job on the link. */
+        private const val GAVE_WAY_MS = 50L
+
         /** What a read on a set-up link asks before START: the step goal and the watch condition, both used by the decoder. */
         internal val QUICK_SETUP_COMMANDS: List<Int> = listOf(STEP_GOAL_COMMAND, WATCH_CONDITION_COMMAND)
         private const val MAX_TRANSFER_ATTEMPTS = 3
@@ -66,6 +69,13 @@ class H5600LifeLogReader internal constructor(private val link: WatchLink, priva
 
     /** How long an attempt waits for the watch to report ready after START (observed: 6 to 50 s). */
     @Volatile internal var readyWaitMs = 60_000L
+
+    /**
+     * Once the watch is ready: no frame from it for this long ends the attempt (before, a stream that stopped held the
+     * link for the attempt's whole 180 s). Longer than the watch's own pauses between blocks (a few seconds), because a
+     * block that is not confirmed stays on the watch and is read again; the blocks confirmed so far are kept.
+     */
+    @Volatile internal var stallMs = 20_000L
 
     private class Transfer(
         val sync: H5600LifeLogSync,
@@ -82,6 +92,16 @@ class H5600LifeLogReader internal constructor(private val link: WatchLink, priva
         var watchCondition: ByteArray? = null
         var bulkCount = 0
         var silent = false
+
+        /** When the watch's last frame came, or when another job gave the link back (the watch waits for us meanwhile). */
+        @Volatile var lastActivityMs = System.currentTimeMillis()
+
+        /** No frame for the stall limit: the attempt ended. */
+        @Volatile var stalled = false
+
+        /** The blocks the watch confirmed (`07 2E id`), and how many notifications had come when the last one was. */
+        val confirmed = mutableSetOf<Int>()
+        var confirmedNotifications = 0
 
         /** The link dropped during this attempt. */
         @Volatile var lost = false
@@ -244,8 +264,10 @@ class H5600LifeLogReader internal constructor(private val link: WatchLink, priva
                 } else {
                     "LifeLog data failed, trying again (attempt $attempt of $MAX_TRANSFER_ATTEMPTS)"
                 }
+            // What waited for the end of the last attempt (the answer to a `39` of the watch, a text) goes out first.
+            if (attempt > 1) job.yieldPoint()
             val outcome =
-                if (linkLostDuringRequest) AttemptOutcome(StepCounterData.unavailable(), restart = false, lost = true)
+                if (linkLostDuringRequest)AttemptOutcome(StepCounterData.unavailable(), restart = false, lost = true)
                 else runAttempt(ZoneId.systemDefault(), peek, job)
             if (outcome.lost || linkLostDuringRequest) {
                 lastError = "The watch disconnected during the LifeLog read. It is read again at the next connection."
@@ -291,7 +313,10 @@ class H5600LifeLogReader internal constructor(private val link: WatchLink, priva
             }
 
             // Re-polls while the watch is silent, and gives up on this attempt after a few silent polls.
-            val watchdog = scope.launch { keepPolling(transfer) }
+            val watchdog = scope.launch {
+                keepPolling(transfer)
+                watchStall(transfer)
+            }
             val completed =
                 try {
                     withTimeoutOrNull(OVERALL_TIMEOUT_MS.milliseconds) { sendFromOutbox(transfer, job) } != null
@@ -302,6 +327,7 @@ class H5600LifeLogReader internal constructor(private val link: WatchLink, priva
             if (transfer.silent) {
                 return AttemptOutcome(StepCounterData.unavailable(), restart = true)
             }
+            if (transfer.stalled) return afterStall(transfer, stepGoal)
             if (!completed) {
                 lastError = "The sync did not finish. Open the Health screen to try again."
             }
@@ -347,6 +373,44 @@ class H5600LifeLogReader internal constructor(private val link: WatchLink, priva
         }
     }
 
+    /** After the watch reported ready: ends the attempt when no frame came for [stallMs]. */
+    private suspend fun watchStall(transfer: Transfer) {
+        transfer.lastActivityMs = System.currentTimeMillis()
+        while (!transfer.finished.isCompleted) {
+            delay(minOf(stallMs / 4, 1_000L).coerceAtLeast(10L))
+            val quiet = System.currentTimeMillis() - transfer.lastActivityMs
+            if (quiet > stallMs && !transfer.finished.isCompleted) {
+                Timber.w("H5600: no frame from the watch for $quiet ms; the attempt ends")
+                transfer.stalled = true
+                finish(transfer)
+                break
+            }
+        }
+    }
+
+    /**
+     * The end of an attempt the watch stopped answering. The blocks it had confirmed are decoded and kept (it does not
+     * send them again); the open block was not confirmed, so it is still on the watch for the next read. Nothing
+     * confirmed yet: the attempt is tried again.
+     */
+    private fun afterStall(transfer: Transfer, stepGoal: Int?): AttemptOutcome {
+        val (notifications, announced, blocks) = synchronized(lock) {
+            Triple(
+                transfer.notifications.take(transfer.confirmedNotifications),
+                LinkedHashMap(transfer.announcements.filterKeys { it in transfer.confirmed }),
+                transfer.confirmed.size,
+            )
+        }
+        org.avmedia.gshockapi.casio.ConnectionKeepAlive.log(
+            "LifeLog attempt ended: no frame from the watch for ${stallMs / 1000} s ($blocks blocks confirmed before)",
+        )
+        val kept = if (blocks == 0) null else H5600HealthDecoder.decode(notifications, announced, transfer.zone, stepGoal, transfer.watchCondition)
+        if (kept == null) return AttemptOutcome(StepCounterData.unavailable(), restart = true)
+        lastError = "The watch stopped answering during the LifeLog read. What it had sent is kept; the rest is read at the next read."
+        org.avmedia.gshockapi.casio.ConnectionKeepAlive.log("LifeLog read stopped early: steps ${kept.currentDaySteps} from $blocks confirmed blocks, the rest stays on the watch")
+        return AttemptOutcome(kept, restart = false)
+    }
+
     /**
      * Polls the watch until it reports ready. A busy reply (`00 01`) and a poll without a reply both mean "still preparing": the
      * watch answers a few polls busy, then goes silent while it prepares and answers the next poll ready (about
@@ -389,7 +453,7 @@ class H5600LifeLogReader internal constructor(private val link: WatchLink, priva
             // While the watch is quiet (preparing, between blocks) a more urgent job does not wait for its next message.
             val got = withTimeoutOrNull(IDLE_TURN_MS.milliseconds) { transfer.outbox.receiveCatching() }
             if (got == null) {
-                job.yieldPoint()
+                yieldTurn(transfer, job)
                 continue
             }
             var write = got.getOrNull() ?: break
@@ -406,9 +470,17 @@ class H5600LifeLogReader internal constructor(private val link: WatchLink, priva
                 write = following
             }
             if (ended) break
-            job.yieldPoint()
+            yieldTurn(transfer, job)
         }
         last?.await()
+    }
+
+    /** A block boundary. When another job took the link meanwhile, the watch's quiet during it is not a stall. */
+    private suspend fun yieldTurn(transfer: Transfer, job: JobScope) {
+        val before = System.currentTimeMillis()
+        job.yieldPoint()
+        val now = System.currentTimeMillis()
+        if (now - before >= GAVE_WAY_MS) transfer.lastActivityMs = now
     }
 
     /**
@@ -465,6 +537,7 @@ class H5600LifeLogReader internal constructor(private val link: WatchLink, priva
     ) {
         val transfer = synchronized(lock) { active } ?: return
         val bytes = h5600Bytes(hex)
+        transfer.lastActivityMs = System.currentTimeMillis()
         val (writes, nowDone) =
             synchronized(lock) {
                 when (channel) {
@@ -482,6 +555,10 @@ class H5600LifeLogReader internal constructor(private val link: WatchLink, priva
                         announcement(bytes)?.let { (index, length) ->
                             transfer.announcements[index] = length
                             Timber.i("H5600: announced index 0x${index.toString(16)} length $length")
+                        }
+                        if (bytes.size >= 3 && bytes[0] == 0x07.toByte() && bytes[1] == 0x2E.toByte()) {
+                            transfer.confirmed += bytes[2].toInt() and 0xFF
+                            transfer.confirmedNotifications = transfer.notifications.size
                         }
                     }
 
