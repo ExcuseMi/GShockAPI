@@ -90,4 +90,59 @@ class NotificationLinkDropTest {
         delay(200)
         assertEquals(listOf(12), sizes(gatt))
     }
+
+    /** The last chunk's write result came and the link dropped right then: the whole text was sent once more and shown twice. */
+    @Test fun aDropRightAfterTheLastChunkWentOutDoesNotSendTheTextTwice(): Unit = runBlocking {
+        val link = readyLink(links, "A", FakeGatt())
+        val sender = link.notifications.sender
+        sender.spacingMs = 5
+        sender.holdPollMs = 5
+        val drops = AtomicInteger()
+        val written = java.util.concurrent.CopyOnWriteArrayList<Int>()
+        sender.linkDrops = { drops.get() }
+        sender.writer = { chunk ->
+            written += chunk.size
+            if (written.size == 3) drops.incrementAndGet() // the watch has the chunk, then the link goes
+            true
+        }
+        TestLog.clear()
+        val outcome = withTimeout(10_000) { sender.send(ByteArray(50)).await() }
+        assertEquals(NotificationSender.Outcome.SENT, outcome)
+        assertEquals("the three chunks once", listOf(20, 20, 10), written.toList())
+        assertTrue(TestLog.recentEvents().none { it.contains("the whole text is sent once more") })
+    }
+
+    /** A drop after a chunk in the middle is still what it was: the whole text once more. */
+    @Test fun aDropAfterAMiddleChunkStillSendsTheWholeTextOnceMore(): Unit = runBlocking {
+        val link = readyLink(links, "A", FakeGatt())
+        val sender = link.notifications.sender
+        sender.spacingMs = 5
+        sender.holdPollMs = 5
+        val drops = AtomicInteger()
+        val written = java.util.concurrent.CopyOnWriteArrayList<Int>()
+        sender.linkDrops = { drops.get() }
+        sender.writer = { chunk ->
+            written += chunk.size
+            if (written.size == 2) drops.incrementAndGet()
+            true
+        }
+        assertEquals(NotificationSender.Outcome.SENT, withTimeout(10_000) { sender.send(ByteArray(50)).await() })
+        assertEquals(listOf(20, 20, 20, 20, 10), written.toList())
+    }
+
+    /** Texts handed over one after the other each started in a coroutine of their own: two could reach the watch swapped. */
+    @Test fun textsGoOutInTheOrderTheyWereHandedOver(): Unit = runBlocking {
+        val link = readyLink(links, "A", FakeGatt())
+        val sender = link.notifications.sender
+        sender.holdPollMs = 5
+        val written = java.util.concurrent.CopyOnWriteArrayList<Int>()
+        sender.writer = { chunk ->
+            written += chunk[0].toInt()
+            true
+        }
+        val order = (1..100).toList()
+        val sent = order.map { n -> sender.send(ByteArray(4) { n.toByte() }) }
+        withTimeout(20_000) { sent.forEach { it.await() } }
+        assertEquals(order, written.toList())
+    }
 }

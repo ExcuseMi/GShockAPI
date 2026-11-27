@@ -112,9 +112,12 @@ class LinkNotificationSender internal constructor(
     /**
      * Queues [buffer] (already inverted). The result comes when the text is sent, dropped or held back too long; each
      * outcome is one line in the watch log (a text that never reached the watch was silent before).
+     *
+     * The text takes its place in the line before this returns (it runs in the caller up to its first wait), so texts
+     * go out in the order they were handed over: each started on a thread of its own before, and two could swap.
      */
     fun send(buffer: ByteArray): Deferred<NotificationSender.Outcome> =
-        scope.async {
+        scope.async(start = kotlinx.coroutines.CoroutineStart.UNDISPATCHED) {
             val outcome = mutex.withLock {
                 var sent = if (!awaitAllowed()) NotificationSender.Outcome.HELD_TOO_LONG else writePieces(buffer)
                 if (sent == null) {
@@ -161,8 +164,10 @@ class LinkNotificationSender internal constructor(
             if (i > 0 && linkDrops() != drops) return null
             val write = if (i > 0 && writer === linkWriter) laterWriter else writer
             val ok = write(piece)
-            // The first chunk may have waited for the link: the count is taken once it went out.
-            if (i == 0) drops = linkDrops() else if (linkDrops() != drops) return null
+            // The first chunk may have waited for the link: the count is taken once it went out. A drop right after the
+            // last chunk went out is no reason to send again: the watch has the whole text and would show it twice.
+            val whole = ok && i == pieces.lastIndex
+            if (i == 0) drops = linkDrops() else if (!whole && linkDrops() != drops) return null
             if (!ok) {
                 Timber.w("Notification text: chunk ${i + 1} of ${pieces.size} failed, the rest is dropped")
                 return NotificationSender.Outcome.WRITE_FAILED

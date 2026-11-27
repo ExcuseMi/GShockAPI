@@ -360,7 +360,10 @@ interface IGShockAPI {
     @Deprecated(SINGLE_WATCH)
     fun sendAppNotification(notification: AppNotification)
 
-    /** Like [sendAppNotification], and waits for how the text ended: only SENT means it reached the watch. */
+    /**
+     * Like [sendAppNotification], and waits for how the text ended: only SENT means it reached the watch. The text is
+     * queued before this waits for the first time, so calls started in order are sent in that order.
+     */
     @Deprecated(SINGLE_WATCH)
     suspend fun sendAppNotificationAndWait(notification: AppNotification): org.avmedia.gshockapi.casio.NotificationSender.Outcome
 
