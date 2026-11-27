@@ -1,0 +1,89 @@
+package org.avmedia.gshockapi.driver
+
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.map
+import org.avmedia.gshockapi.io.SettingWriteResult
+import org.avmedia.gshockapi.link.LinkState
+
+/**
+ * A driver made from a data file alone: model match, capabilities and the simple settings. A family whose settings
+ * are all bits in frames needs nothing more. A code driver extends it for what the file cannot say.
+ */
+open class DataDriver(val file: DataFile) : WatchDriver {
+    override val id: String get() = file.id
+
+    override fun matches(advertisedName: String): Boolean = file.model(advertisedName) != null
+
+    override fun capabilities(conn: WatchConnection): Set<String> =
+        file.model(conn.name)?.let { file.capabilities + it.capabilitiesAdd }.orEmpty()
+
+    protected fun unsupported(key: Key<*>, conn: WatchConnection): DriverResult.Unsupported? = when {
+        file.model(conn.name) == null -> DriverResult.Unsupported(key.id, "${conn.name} is not a ${file.id} watch")
+        key.id !in capabilities(conn) -> DriverResult.Unsupported(key.id, "${DataFile.modelName(conn.name)} does not have ${key.id}")
+        else -> null
+    }
+
+    override suspend fun <T : Any> get(conn: WatchConnection, key: Key<T>): DriverResult<T> {
+        unsupported(key, conn)?.let { return it }
+        val spec = file.settings[key.id] ?: return DriverResult.Unsupported(key.id, "no data-file layout for ${key.id}")
+        val value: Any = if (spec.type == "records") {
+            val maps = spec.frames.flatMap { rf ->
+                val frame = conn.readFrame(rf.code) ?: return DriverResult.Failed(key.id, "The watch did not answer.")
+                DataSettingCodec.decodeRecords(spec, frame).orEmpty()
+            }
+            if (key == Keys.ALARMS) maps.map(::slot) else maps
+        } else {
+            val frame = conn.readFrame(spec.code) ?: return DriverResult.Failed(key.id, "The watch did not answer.")
+            DataSettingCodec.decode(spec, frame) ?: return DriverResult.Failed(key.id, "The watch sent a value this file does not know.")
+        }
+        if (!key.type.isInstance(value)) return DriverResult.Failed(key.id, "${key.id} is not a ${key.type.simpleName}")
+        return DriverResult.Ok(key.type.cast(value)!!)
+    }
+
+    override suspend fun <T : Any> set(conn: WatchConnection, key: Key<T>, value: T): DriverResult<Unit> {
+        unsupported(key, conn)?.let { return it }
+        if (!key.writable) return DriverResult.Unsupported(key.id, "${key.id} is read-only")
+        val spec = file.settings[key.id] ?: return DriverResult.Unsupported(key.id, "no data-file layout for ${key.id}")
+        if (spec.type == "records") return setRecords(conn, key, spec, value)
+        val result = conn.modify(spec.code, DataSettingCodec.touched(spec)) { frame ->
+            val others = spec.requires?.let { r -> file.settings[r]?.let { mapOf(r to DataSettingCodec.decode(it, frame)) } }.orEmpty()
+            DataSettingCodec.encode(spec, frame, value, others)
+        }
+        return result.toDriverResult(key.id)
+    }
+
+    private suspend fun setRecords(conn: WatchConnection, key: Key<*>, spec: SettingSpec, value: Any): DriverResult<Unit> {
+        @Suppress("UNCHECKED_CAST")
+        val maps = (value as? List<Any>)?.map { if (it is AlarmSlot) fields(it) else it as? Map<String, Any> ?: return DriverResult.Failed(key.id, "not a record") }
+            ?: return DriverResult.Failed(key.id, "not a list of records")
+        var rest = maps
+        for (rf in spec.frames) {
+            val mine = rest.take(rf.count).also { rest = rest.drop(rf.count) }
+            if (mine.isEmpty()) break
+            val r = conn.modify(rf.code, DataSettingCodec.touchedRecords(spec, rf.code)) { DataSettingCodec.encodeRecords(spec, it, mine) }
+            val d = r.toDriverResult(key.id)
+            if (d !is DriverResult.Ok) return d
+        }
+        return DriverResult.Ok(Unit)
+    }
+
+    override fun events(conn: WatchConnection): Flow<WatchEvent> =
+        conn.state.map { if (it == LinkState.DISCONNECTED) WatchEvent.Disconnected else WatchEvent.Connected }.distinctUntilChanged()
+
+    companion object {
+        fun slot(m: Map<String, Any>) = AlarmSlot(
+            hour = m["hour"] as Int, minute = m["minute"] as Int, enabled = m["enabled"] == true,
+            oneTime = m["one_time"] == true, hourlyChime = m["hourly_chime"] == true,
+        )
+
+        fun fields(a: AlarmSlot): Map<String, Any> =
+            mapOf("hour" to a.hour, "minute" to a.minute, "enabled" to a.enabled, "one_time" to a.oneTime, "hourly_chime" to a.hourlyChime)
+
+        fun SettingWriteResult.toDriverResult(key: String): DriverResult<Unit> = when (this) {
+            SettingWriteResult.Unchanged, SettingWriteResult.Done, SettingWriteResult.Written -> DriverResult.Ok(Unit)
+            SettingWriteResult.Unconfirmed -> DriverResult.Unconfirmed(key)
+            is SettingWriteResult.Failed -> DriverResult.Failed(key, message)
+        }
+    }
+}

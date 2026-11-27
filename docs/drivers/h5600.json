@@ -1,0 +1,107 @@
+{
+  "schema": 1,
+  "kind": "watch-driver",
+  "id": "h5600",
+  "family": "h5600",
+  "title": "H5600 family (modules 3515, 3516, 3577, 3586)",
+  "code_driver": "org.avmedia.gshockapi.driver.H5600Driver",
+  "about": "Frame positions count the command code as byte 0, as the requests and answers are on the wire. Every setting is written by read, change only its own bytes, write, read back. 'verified': false means the layout is in the library code but the code itself says it is not confirmed on this family, or the value was not found in the code.",
+  "models": [
+    { "name": "GBX-H5600", "module": "3586", "faces": 4, "capabilities_add": ["face.tide", "tide.send"] },
+    { "name": "DW-H5600", "module": "3516", "faces": 3 },
+    { "name": "GM-H5600", "module": "3577", "faces": 3 },
+    { "name": "GBD-H2000", "module": "3515", "faces": 3, "verified": false, "note": "In the model table with the DW-H5600 settings; no test or code path checks the frames on this model." },
+    { "name": "DW-GH5600", "module": "3515", "faces": 3, "verified": false, "note": "As GBD-H2000." }
+  ],
+  "facts": {
+    "alarm_count": 4,
+    "always_connected": true,
+    "battery": { "code": "0x28", "byte": 1, "min": 0, "max": 6 },
+    "light_durations": { "short": "1.5s", "long": "5s" }
+  },
+  "capabilities": [
+    "light.auto_light", "light.duration", "units.length", "steps.reminder", "steps.goal",
+    "hr.measurement", "sound.mode", "face.number", "sleep.bedtime", "sleep.wake_up",
+    "smart_alarm.on", "smart_alarm.snooze", "smart_alarm.time", "smart_alarm.window", "alarms",
+    "time.sync", "steps.today", "lifelog", "sleep.records", "workouts", "notifications.text", "battery.level"
+  ],
+  "code_only": {
+    "time.sync": "Time, DST and world cities in a fixed order with the home location (0x24) in the middle; stamped when its turn comes.",
+    "steps.today": "From the LifeLog transfer (multi-packet, own channels), not from an activity record.",
+    "lifelog": "Header, sections, block confirmations, stall and retry rules.",
+    "sleep.records": "0x5A and 0x53 sections, nights and stages.",
+    "workouts": "Group headers, chunks and laps on the transfer channels.",
+    "notifications.text": "0x3D gate, MTU and chunking.",
+    "battery.level": "0x28 index 0 step 0..6, shown as step * 100 / 6.",
+    "connection.setup": "0x39 time manager read and written back after connecting; 0x49 and 0x47 answered at any time."
+  },
+  "settings": [
+    {
+      "key": "light.auto_light", "type": "bool", "code": "0x13", "byte": 1, "mask": "0x04", "invert": true, "min_length": 3,
+      "verified": false, "note": "Set bit means off. The library code says this polarity is not confirmed on this family."
+    },
+    {
+      "key": "light.duration", "type": "choice", "code": "0x13", "byte": 2, "mask": "0x0F", "min_length": 3,
+      "values": { "short": 0, "long": 1 }, "write_over_unknown": true
+    },
+    {
+      "key": "units.length", "type": "choice", "code": "0x13", "byte": 12, "mask": "0x01", "min_length": 17,
+      "values": { "km": 0, "miles": 1 }
+    },
+    {
+      "key": "steps.reminder", "type": "bool", "code": "0x13", "byte": 12, "mask": "0x02", "min_length": 17
+    },
+    {
+      "key": "hr.measurement", "type": "choice", "code": "0x41", "byte": 1, "mask": "0x03", "min_length": 5,
+      "values": { "off": 0, "activities": 1, "always": 2 }
+    },
+    {
+      "key": "sound.mode", "type": "choice", "code": "0x42", "byte": 1, "min_length": 6,
+      "values": { "all_off": 0, "sound_only": 2, "custom": 5, "vibe_only": 8, "all_on": 10 }
+    },
+    {
+      "key": "face.number", "type": "uint", "code": "0x51", "byte": 1, "min_length": 6, "min": 1, "max": 4,
+      "note": "The upper limit is the model's 'faces' (3 or 4)."
+    },
+    {
+      "key": "steps.goal", "type": "uint", "code": "0x43", "byte": 1, "length": 3, "order": "little", "min_length": 4,
+      "min": 100, "max": 200000
+    },
+    {
+      "key": "sleep.bedtime", "type": "time", "code": "0x4F", "byte": 2, "min_length": 6
+    },
+    {
+      "key": "sleep.wake_up", "type": "time", "code": "0x4F", "byte": 4, "min_length": 6
+    },
+    {
+      "key": "smart_alarm.on", "type": "bool", "code": "0x50", "byte": 3, "mask": "0x01", "min_length": 5,
+      "clear_when_false": "0x02", "note": "Off also clears the snooze bit."
+    },
+    {
+      "key": "smart_alarm.snooze", "type": "bool", "code": "0x50", "byte": 3, "mask": "0x02", "min_length": 5,
+      "requires": "smart_alarm.on", "note": "Can be switched on only while the smart alarm is on."
+    },
+    {
+      "key": "smart_alarm.time", "type": "time", "code": "0x50", "byte": 1, "min_length": 5
+    },
+    {
+      "key": "smart_alarm.window", "type": "uint", "code": "0x50", "byte": 4, "min_length": 5, "allowed": [15, 30, 45, 60]
+    },
+    {
+      "key": "alarms", "type": "records", "record_size": 4,
+      "frames": [
+        { "code": "0x15", "offset": 1, "count": 1 },
+        { "code": "0x16", "offset": 1, "count": 3, "verified": false, "note": "Written with 3 records (alarms 2 to 4); a read is expected to hold at least 16 value bytes, room for 4. Which is right on this family is not settled in the code." }
+      ],
+      "fields": [
+        { "name": "enabled", "type": "bool", "byte": 0, "mask": "0x40" },
+        { "name": "one_time", "type": "bool", "byte": 0, "mask": "0x20" },
+        { "name": "hourly_chime", "type": "bool", "byte": 0, "mask": "0x80" },
+        { "name": "hour", "type": "uint", "byte": 2, "max": 23 },
+        { "name": "minute", "type": "uint", "byte": 3, "max": 59 }
+      ],
+      "fixed": { "1": "0x40" },
+      "note": "Today the library writes alarms as whole new frames, and never sets one_time on the first alarm; the data codec keeps unknown bits."
+    }
+  ]
+}
