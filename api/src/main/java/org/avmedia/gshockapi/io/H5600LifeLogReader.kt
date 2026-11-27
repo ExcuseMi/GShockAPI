@@ -96,6 +96,9 @@ class H5600LifeLogReader internal constructor(private val link: WatchLink, priva
         /** When the watch's last frame came, or when another job gave the link back (the watch waits for us meanwhile). */
         @Volatile var lastActivityMs = System.currentTimeMillis()
 
+        /** The job is at a block boundary and may have given the link to another job: no stall is counted meanwhile. */
+        @Volatile var yielding = false
+
         /** No frame for the stall limit: the attempt ended. */
         @Volatile var stalled = false
 
@@ -378,6 +381,8 @@ class H5600LifeLogReader internal constructor(private val link: WatchLink, priva
         transfer.lastActivityMs = System.currentTimeMillis()
         while (!transfer.finished.isCompleted) {
             delay(minOf(stallMs / 4, 1_000L).coerceAtLeast(10L))
+            // Another job has the link (its commands may take longer than the limit): the watch waits for us, no stall.
+            if (transfer.yielding) continue
             val quiet = System.currentTimeMillis() - transfer.lastActivityMs
             if (quiet > stallMs && !transfer.finished.isCompleted) {
                 Timber.w("H5600: no frame from the watch for $quiet ms; the attempt ends")
@@ -478,9 +483,14 @@ class H5600LifeLogReader internal constructor(private val link: WatchLink, priva
     /** A block boundary. When another job took the link meanwhile, the watch's quiet during it is not a stall. */
     private suspend fun yieldTurn(transfer: Transfer, job: JobScope) {
         val before = System.currentTimeMillis()
-        job.yieldPoint()
-        val now = System.currentTimeMillis()
-        if (now - before >= GAVE_WAY_MS) transfer.lastActivityMs = now
+        transfer.yielding = true
+        try {
+            job.yieldPoint()
+        } finally {
+            val now = System.currentTimeMillis()
+            if (now - before >= GAVE_WAY_MS) transfer.lastActivityMs = now
+            transfer.yielding = false
+        }
     }
 
     /**

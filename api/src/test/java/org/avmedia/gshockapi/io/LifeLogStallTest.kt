@@ -4,6 +4,7 @@ import java.util.concurrent.atomic.AtomicInteger
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.async
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
@@ -158,5 +159,26 @@ class LifeLogStallTest {
         assertEquals("our three attempts stay: $lines", 3, lines.count { it.endsWith("LifeLog attempt ended: no frame from the watch for 0 s (0 blocks confirmed before)") })
         assertTrue(H5600HealthIO.lastError.orEmpty(), H5600HealthIO.lastError.orEmpty().contains("could not be read"))
         assertTrue("three stalled attempts took $seconds s", seconds < 30.0)
+    }
+
+    /** Another job that took the link for longer than the stall limit: the watch's quiet during it ended the attempt. */
+    @Test fun aJobThatHoldsTheLinkLongerThanTheLimitIsNotAStall() = runBlocking {
+        val watch = StallingWatch(confirmHeader = true)
+        WatchLink.queue = WatchQueue(transport = watch, readTimeoutMs = 2_000)
+        reader.stallMs = 800
+        val read = async(Dispatchers.Default) { H5600HealthIO.request(peek = true) }
+        withTimeout(10_000) { while (watch.starts.get() == 0) delay(10) }
+        val jobEnd = java.util.concurrent.atomic.AtomicLong()
+        val urgent = WatchLink.link.submit(
+            org.avmedia.gshockapi.link.JobSpec("long job", org.avmedia.gshockapi.link.JobSource.System("test"), org.avmedia.gshockapi.link.JobPriority.USER),
+        ) {
+            delay(2_500)
+            jobEnd.set(System.currentTimeMillis())
+        }
+        urgent.await()
+        assertTrue("the long job ran", jobEnd.get() > 0)
+        withTimeout(30_000) { read.await() }
+        val after = System.currentTimeMillis() - jobEnd.get()
+        assertTrue("the attempt ended $after ms after the other job gave the link back, the limit is 800 ms", after >= 600)
     }
 }
