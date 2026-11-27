@@ -292,7 +292,7 @@ data object WatchInfo {
                 worldCitiesCount = 6, dstCount = 3,
                 hasAutoLight = true, hasReminders = false,
                 shortLightDuration = "1.5s", longLightDuration = "3s",
-                // The official app's step table for this model runs 24 (full) down to 12; reported: 24 = 5 bars, 23 = 4.
+                // The battery steps of this model run from 24 (full) down to 12; reported: 24 = 5 bars, 23 = 4.
                 batteryLevelLowerLimit = 12, batteryLevelUpperLimit = 24,
                 hasMultipleFonts = true,
             ),
