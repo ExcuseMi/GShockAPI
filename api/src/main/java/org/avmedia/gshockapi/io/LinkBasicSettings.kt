@@ -9,7 +9,6 @@ import kotlinx.coroutines.launch
 import org.avmedia.gshockapi.ble.GetSetMode
 import org.avmedia.gshockapi.link.WatchLink
 import org.avmedia.gshockapi.model.Settings
-import org.avmedia.gshockapi.model.SmartAlarm
 import org.avmedia.gshockapi.model.SoundMode
 import org.avmedia.gshockapi.model.WatchFaceItem
 import org.json.JSONObject
@@ -81,16 +80,7 @@ class LinkBasicSettings internal constructor(private val link: WatchLink, privat
         value.optString("watchFaceItem", "").takeIf { it.isNotEmpty() }?.let { s ->
             WatchFaceItem.entries.firstOrNull { it.name.equals(s, ignoreCase = true) }?.let { h5600.setWatchFaceItem(it) }
         }
-        value.optJSONObject("smartAlarm")?.let { sa ->
-            h5600.setSmartAlarm(
-                SmartAlarm(
-                    hour = sa.optInt("hour", 0),
-                    minute = sa.optInt("minute", 0),
-                    enabled = sa.optBoolean("enabled", false),
-                    snooze = sa.optBoolean("snooze", false),
-                    windowMin = sa.optInt("windowMin", 0),
-                ),
-            )
-        }
+        // The smart alarm (0x50) is never written from here: a Settings object read earlier carries an old copy of it,
+        // and writing that back undid the wake-up alarm's smart alarm. It has its own writes.
     }
 }
