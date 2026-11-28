@@ -7,6 +7,8 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.filter
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.merge
+import org.avmedia.gshockapi.AppNotification
+import org.avmedia.gshockapi.casio.NotificationSender
 import org.avmedia.gshockapi.io.ActivityListCodec
 import org.avmedia.gshockapi.io.ActivityModels
 import org.avmedia.gshockapi.io.IO
@@ -49,6 +51,7 @@ class H5600Driver(file: DataFile) : DataDriver(file) {
             key == Keys.WORKOUTS -> return code(key) {
                 (linkOf(conn) ?: return needsLink(key)).api.downloadWorkouts(userAsked = true) ?: error("The workout read did not start.")
             }
+            key == Keys.BUTTON -> (linkOf(conn) ?: return needsLink(key)).button()
             key == Keys.CONDITION -> conn.readFrame(CONDITION_CODE) ?: return DriverResult.Failed(key.id, NO_ANSWER)
             // Today's per-link time reads, as they are.
             key == Keys.HOME_TIME -> return code(key) { (linkOf(conn) ?: return needsLink(key)).api.getHomeTime() }
@@ -85,6 +88,17 @@ class H5600Driver(file: DataFile) : DataDriver(file) {
                 val link = linkOf(conn) ?: return needsLink(key)
                 val sync = value as TimeSync
                 code(key) { link.api.setTime(sync.timeZone, sync.timeMs, sync.offsetMs) }
+            }
+            // Today's notification sender on the link (gate, MTU, chunks, spacing).
+            Keys.NOTIFICATION -> {
+                val link = linkOf(conn) ?: return needsLink(key)
+                val outcome = code<NotificationSender.Outcome>(key) { link.api.sendAppNotificationAndWait(value as AppNotification) }
+                when (outcome) {
+                    is DriverResult.Ok -> if (outcome.value == NotificationSender.Outcome.SENT) DriverResult.Ok(Unit) else DriverResult.Failed(key.id, outcome.value.name)
+                    is DriverResult.Failed -> outcome
+                    is DriverResult.Unsupported -> outcome
+                    is DriverResult.Unconfirmed -> outcome
+                }
             }
             // The data file's records, each frame from a fresh read: only the slots' fields and fixed byte change.
             Keys.ALARMS -> {

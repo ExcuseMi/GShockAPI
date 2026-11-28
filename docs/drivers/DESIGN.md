@@ -154,6 +154,12 @@ now), `Keys.BATTERY`; `Keys.CONDITION` is a plain 0x28 read on any connection. T
 `WatchEvent.Data(Keys.WATCH_DATA, read)`. `Drivers.currentEvents()` follows the single-watch link, bound again when the
 model changes. The workout sink stays: it says whether a workout was stored before the watch drops it.
 
+## Notifications and the button (done)
+
+`Keys.NOTIFICATION` sends a phone notification with today's sender on the link (gate, MTU, chunks): Ok when sent,
+else Failed with the sender's outcome name. `Keys.BUTTON` is the button of this connection (its `IO.WatchButton`
+name); the driver's events carry it as `WatchEvent.ButtonPressed` at each connection.
+
 ## Open questions
 
 1. Alarms: the per-frame write that keeps unknown bits is to be checked on a watch (alarm 1 and the three in 0x16).

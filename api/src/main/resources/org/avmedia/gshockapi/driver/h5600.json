@@ -37,7 +37,7 @@
     "face.number", "face.custom_item", "smart_alarm.on", "smart_alarm.snooze", "smart_alarm.time", "smart_alarm.window",
     "alarms", "activities.running", "activities.walking", "activities.gym_workout", "activities.interval_timer", "time.sync",
     "time.home_time", "time.world_cities", "time.dst", "battery.condition",
-    "steps.today", "lifelog", "sleep.records", "workouts", "notifications.text", "battery.level"
+    "steps.today", "lifelog", "sleep.records", "workouts", "notifications.text", "battery.level", "connection.button"
   ],
   "code_only": {
     "time.sync": "Time, DST and world cities in a fixed order with the home location (0x24) in the middle; stamped when its turn comes.",
@@ -49,6 +49,7 @@
     "sleep.records": "0x5A and 0x53 sections, nights and stages.",
     "workouts": "Group headers, chunks and laps on the transfer channels.",
     "notifications.text": "0x3D gate, MTU and chunking.",
+    "connection.button": "The 0x10 answer of this connection: the button that started it.",
     "battery.level": "0x28 index 0 step 0..6, shown as step * 100 / 6.",
     "battery.condition": "The 0x28 answer as it came: battery step, temperature, the workout and pending flags.",
     "connection.setup": "0x39 time manager read and written back after connecting; 0x49 and 0x47 answered at any time.",

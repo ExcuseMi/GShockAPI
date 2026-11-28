@@ -1,6 +1,7 @@
 package org.avmedia.gshockapi.driver
 
 import org.avmedia.gshockapi.io.WorkoutRunResult
+import org.avmedia.gshockapi.AppNotification
 import org.avmedia.gshockapi.model.SleepData
 import org.avmedia.gshockapi.model.StepCounterData
 
@@ -120,6 +121,15 @@ object Keys {
 
     /** Reads the watch's new workouts now (the button's read); each goes to the workout sink and on [WatchDriver.events]. */
     val WORKOUTS = Key.of<WorkoutRunResult>("workouts", writable = false)
+
+    /**
+     * A phone notification for the watch's screen (`WatchApi.sendAppNotificationAndWait`): Ok when it was sent, else
+     * Failed with the sender's outcome name as the message (`HELD_TOO_LONG`, `WRITE_FAILED`, `EMPTY`).
+     */
+    val NOTIFICATION = Key.of<AppNotification>("notifications.text")
+
+    /** The button that started this connection, as its `IO.WatchButton` name (also [WatchEvent.ButtonPressed] at each connection). */
+    val BUTTON = Key.of<String>("connection.button", writable = false)
 
     /** [WatchEvent.Data.kind] of a copy of a watch read ([org.avmedia.gshockapi.io.WatchDataTap.Read]). */
     const val WATCH_DATA = "watch_data"

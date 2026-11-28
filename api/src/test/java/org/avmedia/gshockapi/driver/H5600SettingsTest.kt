@@ -301,6 +301,18 @@ class H5600SettingsTest {
         assertTrue(data.all { it.kind == Keys.WATCH_DATA })
     }
 
+    /** The notification text and the connection's button are code on the link: refused before anything is sent without it. */
+    @Test fun notificationsAndTheButtonNeedTheLink() = runTest {
+        val watch = FakeConnection("CASIO GBX-H5600", mutableMapOf())
+        val bound = DriverEngine(DriverRegistry(listOf(driver), discovered = { emptyList() })).bind(watch)
+        val n = org.avmedia.gshockapi.AppNotification(org.avmedia.gshockapi.NotificationType.GENERIC, "20261128T080000", "App", "Title", "Text")
+        for (r in listOf(bound.set(Keys.NOTIFICATION, n), bound.get(Keys.BUTTON))) {
+            assertTrue(r.toString(), r is DriverResult.Unsupported && r.reason.contains("link engine"))
+        }
+        assertTrue(bound.set(Keys.BUTTON, "LOWER_RIGHT") is DriverResult.Unsupported)
+        assertEquals(0, watch.writes)
+    }
+
     @Test fun theLibraryFindsItsOwnFile() {
         assertTrue(Drivers.driverFor("CASIO GBX-H5600") is H5600Driver)
         assertNull(Drivers.driverFor("CASIO GW-B5600"))
