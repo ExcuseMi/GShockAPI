@@ -313,6 +313,26 @@ class H5600SettingsTest {
         assertEquals(0, watch.writes)
     }
 
+    /** What an app asks the driver instead of the model table gives the same answer for every model of the file. */
+    @Test fun theDriversCapabilitiesAgreeWithTheModelTable() {
+        for (m in file.models) {
+            val name = "CASIO ${m.name}"
+            val info = org.avmedia.gshockapi.WatchInfo.infoFor(name)
+            val caps = Drivers.capabilities(name)
+            fun has(k: Key<*>) = Keys.capabilityOf(k.id) in caps
+            assertEquals(name, info.hasAutoLight, has(Keys.AUTO_LIGHT))
+            assertEquals(name, info.hasLight, has(Keys.LIGHT_DURATION))
+            assertEquals(name, info.hasBatteryLevel, has(Keys.BATTERY))
+            assertEquals(name, info.worldCities, has(Keys.worldCity(0)))
+            assertEquals(name, info.hasHomeTime, has(Keys.HOME_TIME))
+            assertEquals(name, info.hasStepCounter, has(Keys.STEPS_TODAY))
+            assertEquals(name, info.alarmCount > 0, has(Keys.ALARMS))
+            assertEquals(name, info.alarmCount, Drivers.alarmCount(name))
+            assertTrue(name, has(Keys.LIFELOG) && has(Keys.LIFELOG_PEEK))
+        }
+        assertNull(Drivers.alarmCount("CASIO GW-B5600"))
+    }
+
     @Test fun theLibraryFindsItsOwnFile() {
         assertTrue(Drivers.driverFor("CASIO GBX-H5600") is H5600Driver)
         assertNull(Drivers.driverFor("CASIO GW-B5600"))
