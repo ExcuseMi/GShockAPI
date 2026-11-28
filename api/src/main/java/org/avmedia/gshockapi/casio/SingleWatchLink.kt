@@ -61,6 +61,9 @@ object WatchLink {
     /** The public calls on the one link, for the deprecated single-watch [org.avmedia.gshockapi.GShockAPI] calls. */
     val api: org.avmedia.gshockapi.WatchApi get() = link.api
 
+    /** The one link as a driver's connection, for [org.avmedia.gshockapi.driver.Drivers.bindCurrent]. */
+    val driverConnection: org.avmedia.gshockapi.driver.LinkConnection get() = org.avmedia.gshockapi.driver.LinkConnection(link)
+
     /** True for the one link: the steps that only a single-watch adapter has run on it alone. */
     fun isTheOne(other: org.avmedia.gshockapi.link.WatchLink): Boolean = other === link
 

@@ -3,7 +3,10 @@ package org.avmedia.gshockapi.driver
 import java.io.File
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.test.UnconfinedTestDispatcher
 import kotlinx.coroutines.test.runTest
+import org.avmedia.gshockapi.io.WatchDataTap
 import org.avmedia.gshockapi.io.ActivityListCodec
 import org.avmedia.gshockapi.io.BasicHealthFieldsCodec
 import org.avmedia.gshockapi.io.HeartRateSettingCodec
@@ -25,6 +28,11 @@ import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import org.avmedia.gshockapi.io.AlarmsIO
+import org.avmedia.gshockapi.model.Alarm
+import org.json.JSONArray
+import org.json.JSONObject
+import com.google.gson.Gson
 
 /**
  * Every H5600 setting of the driver against today's codec, used as the oracle: the same value from each frame, the same
@@ -226,6 +234,83 @@ class H5600SettingsTest {
         assertEquals(DriverResult.Ok(Unit), bound.set(Keys.NOTIFICATION_LANGUAGE, 2))
         assertEquals(before, watch.writes) // unchanged: nothing written
         assertTrue(bound.set(Keys.FACE, 4) is DriverResult.Unsupported) // a DW-H5600 has 3 faces
+    }
+
+    /** The alarm slots: each frame from its own read, only the slots' fields and fixed byte change, as the old writer where nothing else is set. */
+    @Test fun alarmsAreWrittenPerFrameFromAFreshRead() = runTest {
+        val unknown = frame(0x16, 0x48, 0x40, 8, 0, 0x01, 0x40, 9, 15, 0x00, 0x40, 10, 30)
+        val watch = FakeConnection("CASIO DW-H5600", mutableMapOf(0x15 to frame(0x15, 0x00, 0x40, 6, 0), 0x16 to unknown))
+        val bound = DriverEngine(DriverRegistry(listOf(driver), discovered = { emptyList() })).bind(watch)
+        assertEquals(DriverResult.Ok(listOf(AlarmSlot(6, 0, false), AlarmSlot(8, 0, true), AlarmSlot(9, 15, false), AlarmSlot(10, 30, false))), bound.get(Keys.ALARMS))
+        val slots = listOf(AlarmSlot(7, 30, true, oneTime = true), AlarmSlot(8, 0, true, oneTime = true), AlarmSlot(9, 15, false, oneTime = true), AlarmSlot(10, 45, true, hourlyChime = true))
+        assertEquals(DriverResult.Ok(Unit), bound.set(Keys.ALARMS, slots))
+        // As the old writer: no "one time" on the first alarm or on one that is off.
+        val old = listOf(Alarm(7, 30, true), Alarm(8, 0, true, oneTime = true), Alarm(9, 15, false), Alarm(10, 45, true, hasHourlyChime = true))
+        assertArrayEquals(AlarmsIO.fromJsonAlarmFirstAlarm(JSONObject(Gson().toJson(old[0]))), watch.frames[0x15])
+        val oldRest = AlarmsIO.fromJsonAlarmSecondaryAlarms(JSONArray().also { a -> old.forEach { a.put(JSONObject(Gson().toJson(it))) } })
+        // The bits the old writer does not know (0x08 of alarm 2, 0x01 of alarm 3) stay as the watch had them.
+        assertArrayEquals(oldRest.copyOf().also { it[1] = (it[1].toInt() or 0x08).toByte(); it[5] = (it[5].toInt() or 0x01).toByte() }, watch.frames[0x16])
+        assertEquals(2, watch.writes)
+        assertEquals(DriverResult.Ok(HourMinute.slots(old)), bound.get(Keys.ALARMS))
+        assertEquals(DriverResult.Ok(Unit), bound.set(Keys.ALARMS, slots))
+        assertEquals(2, watch.writes) // the same slots again: nothing written
+        assertTrue(bound.set(Keys.ALARMS, listOf(AlarmSlot(24, 0, true))) is DriverResult.Failed)
+        assertEquals(2, watch.writes)
+    }
+
+    private object HourMinute {
+        fun slots(alarms: List<Alarm>) = alarms.map { AlarmSlot(it.hour, it.minute, it.enabled, it.oneTime, it.hasHourlyChime) }
+    }
+
+    /** The time is code on the link: a connection without it is refused before anything is sent; the keys with an index share one capability. */
+    @Test fun timeKeysNeedTheLinkAndShareTheirCapability() = runTest {
+        val watch = FakeConnection("CASIO GBX-H5600", mutableMapOf())
+        val bound = DriverEngine(DriverRegistry(listOf(driver), discovered = { emptyList() })).bind(watch)
+        assertTrue(bound.has(Keys.TIME) && bound.has(Keys.HOME_TIME) && bound.has(Keys.worldCity(1)) && bound.has(Keys.dstWatchState(0)))
+        for (r in listOf(bound.set(Keys.TIME, TimeSync("Europe/Brussels", offsetMs = 250)), bound.get(Keys.HOME_TIME), bound.get(Keys.worldCity(0)), bound.get(Keys.dstWatchState(0)))) {
+            assertTrue(r.toString(), r is DriverResult.Unsupported && r.reason.contains("link engine"))
+        }
+        assertTrue(bound.get(Keys.dstWatchState(3)) is DriverResult.Unsupported)
+        assertTrue(bound.get(Keys.TIME) is DriverResult.Unsupported)
+        assertEquals(0, watch.writes)
+        assertEquals("time.world_cities", Keys.capabilityOf(Keys.worldCity(5).id))
+        assertEquals("time.sync", Keys.capabilityOf(Keys.TIME.id))
+    }
+
+    /** Health data: the transfers are code on the link (refused here, nothing sent); 0x28 is a plain read; each watch read's copy is an event of its watch. */
+    @Test fun healthKeysAndTheWatchDataCopies() = runTest {
+        val condition = frame(0x28, 6, 21, 0, 0, 0, 0, 1, 0, 0)
+        val watch = FakeConnection("CASIO DW-H5600", mutableMapOf(0x28 to condition))
+        val bound = DriverEngine(DriverRegistry(listOf(driver), discovered = { emptyList() })).bind(watch)
+        assertArrayEquals(condition, (bound.get(Keys.CONDITION) as DriverResult.Ok).value)
+        for (k in listOf(Keys.LIFELOG, Keys.LIFELOG_PEEK, Keys.SLEEP, Keys.WORKOUTS)) {
+            val r = bound.get(k)
+            assertTrue("$k $r", bound.has(k) && r is DriverResult.Unsupported && r.reason.contains("link engine"))
+        }
+        assertEquals(0, watch.writes)
+        val got = mutableListOf<WatchEvent>()
+        val job = launch(UnconfinedTestDispatcher(testScheduler)) { bound.events.collect { got += it } }
+        testScheduler.runCurrent()
+        WatchDataTap.emit(WatchDataTap.Read("setting", byteArrayOf(0x13), null, code = 0x13, model = "CASIO DW-H5600"))
+        WatchDataTap.emit(WatchDataTap.Read("setting", byteArrayOf(0x13), null, code = 0x13, model = "CASIO GW-B5600"))
+        WatchDataTap.emit(WatchDataTap.Read("workout", byteArrayOf(1), null))
+        testScheduler.runCurrent()
+        job.cancel()
+        val data = got.filterIsInstance<WatchEvent.Data>()
+        assertEquals(listOf("setting", "workout"), data.map { (it.value as WatchDataTap.Read).kind })
+        assertTrue(data.all { it.kind == Keys.WATCH_DATA })
+    }
+
+    /** The notification text and the connection's button are code on the link: refused before anything is sent without it. */
+    @Test fun notificationsAndTheButtonNeedTheLink() = runTest {
+        val watch = FakeConnection("CASIO GBX-H5600", mutableMapOf())
+        val bound = DriverEngine(DriverRegistry(listOf(driver), discovered = { emptyList() })).bind(watch)
+        val n = org.avmedia.gshockapi.AppNotification(org.avmedia.gshockapi.NotificationType.GENERIC, "20261128T080000", "App", "Title", "Text")
+        for (r in listOf(bound.set(Keys.NOTIFICATION, n), bound.get(Keys.BUTTON))) {
+            assertTrue(r.toString(), r is DriverResult.Unsupported && r.reason.contains("link engine"))
+        }
+        assertTrue(bound.set(Keys.BUTTON, "LOWER_RIGHT") is DriverResult.Unsupported)
+        assertEquals(0, watch.writes)
     }
 
     @Test fun theLibraryFindsItsOwnFile() {

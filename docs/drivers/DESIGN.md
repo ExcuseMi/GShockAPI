@@ -135,10 +135,34 @@ suspend fun getAlarms(): ArrayList<Alarm> = ...
 - A later minor release: `ERROR` (still in the binary, so compiled callers keep working).
 - Next major release: removed.
 
+## Alarms and time (done)
+
+- `Keys.ALARMS` is the data file's records: each frame (0x15, then 0x16) read fresh, only the slots' fields and fixed
+  byte changed, written, read back. Unknown bits stay. As the old writer: "one time" only on an alarm that is on,
+  never on the first. A checked write of 0x15 or 0x16 drops the old alarm read's cached answer.
+- Code keys on the link, delegating to today's per-link code: `Keys.TIME` (`TimeSync` with the zone, the clock and the
+  offset; DST, cities, home location and the time stamped ahead by the Bluetooth lead, as `WatchApi.setTime`),
+  `Keys.HOME_TIME`, `Keys.worldCity(i)`, `Keys.dstWatchState(state)`. A key with an index needs its family's capability
+  (`Keys.capabilityOf`). `Drivers.bindCurrent()` binds the single-watch link.
+
+## Health data (done)
+
+Keys on the link, delegating to today's transfers: `Keys.LIFELOG` and `Keys.LIFELOG_PEEK` (the LifeLog read, as
+`getStepCount(peek)`), `Keys.SLEEP` (the nights of a LifeLog read, 0x5A and 0x53), `Keys.WORKOUTS` (a workout read
+now), `Keys.BATTERY`; `Keys.CONDITION` is a plain 0x28 read on any connection. The copy of every watch read
+(`WatchDataTap`) is also a flow (`WatchDataTap.reads`); a driver's `events` carry its watch's reads as
+`WatchEvent.Data(Keys.WATCH_DATA, read)`. `Drivers.currentEvents()` follows the single-watch link, bound again when the
+model changes. The workout sink stays: it says whether a workout was stored before the watch drops it.
+
+## Notifications and the button (done)
+
+`Keys.NOTIFICATION` sends a phone notification with today's sender on the link (gate, MTU, chunks): Ok when sent,
+else Failed with the sender's outcome name. `Keys.BUTTON` is the button of this connection (its `IO.WatchButton`
+name); the driver's events carry it as `WatchEvent.ButtonPressed` at each connection.
+
 ## Open questions
 
-1. Alarms: today's write sends whole new frames and never sets "one time" on alarm 1; the data path keeps unknown
-   bits and writes per frame. Keep the old write until both are checked on a watch?
+1. Alarms: the per-frame write that keeps unknown bits is to be checked on a watch (alarm 1 and the three in 0x16).
 2. Auto light polarity (bit set means off) is not confirmed on this family.
 3. Should a data file be allowed to add a capability the library has no key for (shown as raw)?
 

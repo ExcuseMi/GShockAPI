@@ -20,7 +20,7 @@ open class DataDriver(val file: DataFile) : WatchDriver {
 
     protected fun unsupported(key: Key<*>, conn: WatchConnection): DriverResult.Unsupported? = when {
         file.model(conn.name) == null -> DriverResult.Unsupported(key.id, "${conn.name} is not a ${file.id} watch")
-        key.id !in capabilities(conn) -> DriverResult.Unsupported(key.id, "${DataFile.modelName(conn.name)} does not have ${key.id}")
+        Keys.capabilityOf(key.id) !in capabilities(conn) -> DriverResult.Unsupported(key.id, "${DataFile.modelName(conn.name)} does not have ${key.id}")
         else -> null
     }
 

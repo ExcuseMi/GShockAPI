@@ -3,6 +3,11 @@ package org.avmedia.gshockapi.driver
 import android.os.Build
 import androidx.annotation.RequiresApi
 import java.util.concurrent.ConcurrentHashMap
+import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.flatMapLatest
+import kotlinx.coroutines.flow.map
 
 /**
  * The library's drivers: the built-in family files (the H5600 file in the library's resources) with their code
@@ -48,6 +53,21 @@ object Drivers {
     fun faceCount(advertisedName: String): Int? = (driverFor(advertisedName) as? DataDriver)?.file?.model(advertisedName)?.faces
 
     fun bind(connection: WatchConnection): BoundWatch = BoundWatch(connection, driverFor(connection.name))
+
+    /** The single-watch link (the one today's single-watch calls use), bound to its driver: for code keys such as the time. */
+    @Suppress("DEPRECATION")
+    fun bindCurrent(): BoundWatch = bind(org.avmedia.gshockapi.casio.WatchLink.driverConnection)
+
+    /**
+     * The events of the single-watch link's driver, bound again whenever the connected model changes (nothing but the
+     * link's own changes while it has no driver).
+     */
+    @Suppress("DEPRECATION")
+    @OptIn(ExperimentalCoroutinesApi::class)
+    fun currentEvents(): Flow<WatchEvent> {
+        val conn = org.avmedia.gshockapi.casio.WatchLink.driverConnection
+        return conn.state.map { DataFile.modelName(conn.name) }.distinctUntilChanged().flatMapLatest { bind(conn).events }
+    }
 
     private fun resource(path: String): String =
         requireNotNull(Drivers::class.java.classLoader?.getResourceAsStream(path)) { "$path is not in the library" }.bufferedReader().use { it.readText() }

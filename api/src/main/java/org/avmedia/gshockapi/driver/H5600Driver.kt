@@ -2,21 +2,26 @@ package org.avmedia.gshockapi.driver
 
 import android.os.Build
 import androidx.annotation.RequiresApi
+import kotlin.coroutines.cancellation.CancellationException
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.filter
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.merge
+import org.avmedia.gshockapi.AppNotification
+import org.avmedia.gshockapi.casio.NotificationSender
 import org.avmedia.gshockapi.io.ActivityListCodec
 import org.avmedia.gshockapi.io.ActivityModels
+import org.avmedia.gshockapi.io.IO
 import org.avmedia.gshockapi.io.ProfileCodec
+import org.avmedia.gshockapi.io.WatchDataTap
 import org.avmedia.gshockapi.link.LinkState
-import org.avmedia.gshockapi.model.Alarm
 
 /**
  * The H5600 family: the data file ([file], `h5600.json` in the library's resources) for the simple settings, and code
  * for what it cannot say: the profile (0x45, inverted BCD in cm or inches) and the activity list (0x53) through their
- * codecs. The other code parts hand over to today's H5600 code on the link (time sync, the LifeLog transfer, battery
- * steps, alarm writes); nothing of it is copied or changed here.
+ * codecs. The alarm slots are the file's records (each frame read fresh, changed, written, read back). The other code
+ * parts hand over to today's H5600 code on the link (time sync, the time reads, the LifeLog transfer, battery steps);
+ * nothing of it is copied or changed here.
  */
 @RequiresApi(Build.VERSION_CODES.O)
 class H5600Driver(file: DataFile) : DataDriver(file) {
@@ -30,34 +35,75 @@ class H5600Driver(file: DataFile) : DataDriver(file) {
 
     override suspend fun <T : Any> get(conn: WatchConnection, key: Key<T>): DriverResult<T> {
         unsupported(key, conn)?.let { return it }
-        val value: Any = when (key) {
-            Keys.STEPS_TODAY -> {
+        val value: Any = when {
+            key == Keys.STEPS_TODAY -> {
                 val link = linkOf(conn) ?: return needsLink(key)
                 link.api.getStepCount(peek = true).currentDaySteps ?: return DriverResult.Failed(key.id, "No step count yet.")
             }
-            Keys.BATTERY -> (linkOf(conn) ?: return needsLink(key)).api.getBatteryLevel()
-            Keys.TIME -> return DriverResult.Unsupported(key.id, "the time is written, not read")
+            key == Keys.BATTERY -> (linkOf(conn) ?: return needsLink(key)).api.getBatteryLevel()
+            key == Keys.TIME -> return DriverResult.Unsupported(key.id, "the time is written, not read")
+            // Health data: today's LifeLog and workout transfers on the link, as they are.
+            key == Keys.LIFELOG || key == Keys.LIFELOG_PEEK ->
+                return code(key) { (linkOf(conn) ?: return needsLink(key)).api.getStepCount(peek = key == Keys.LIFELOG_PEEK) }
+            key == Keys.SLEEP -> return code(key) {
+                (linkOf(conn) ?: return needsLink(key)).api.getStepCount(peek = true).h5600?.sleep ?: error("The LifeLog read had no sleep.")
+            }
+            key == Keys.WORKOUTS -> return code(key) {
+                (linkOf(conn) ?: return needsLink(key)).api.downloadWorkouts(userAsked = true) ?: error("The workout read did not start.")
+            }
+            key == Keys.BUTTON -> (linkOf(conn) ?: return needsLink(key)).button()
+            key == Keys.CONDITION -> conn.readFrame(CONDITION_CODE) ?: return DriverResult.Failed(key.id, NO_ANSWER)
+            // Today's per-link time reads, as they are.
+            key == Keys.HOME_TIME -> return code(key) { (linkOf(conn) ?: return needsLink(key)).api.getHomeTime() }
+            key.id.startsWith(Keys.DST + ".") -> {
+                val state = IO.DstState.entries.firstOrNull { it.state == index(key) } ?: return DriverResult.Unsupported(key.id, "no DST state ${index(key)}")
+                return code(key) { (linkOf(conn) ?: return needsLink(key)).api.getDSTWatchState(state) }
+            }
+            key.id.startsWith(Keys.WORLD_CITIES + ".") -> {
+                val i = index(key) ?: return DriverResult.Unsupported(key.id, "no city number")
+                return code(key) { (linkOf(conn) ?: return needsLink(key)).api.getWorldCities(i) }
+            }
             else -> return super.get(conn, key)
         }
         return DriverResult.Ok(key.type.cast(value)!!)
     }
 
+    private fun index(key: Key<*>): Int? = key.id.substringAfterLast('.').toIntOrNull()
+
+    /** Runs today's code for [key]: its answer, or Failed with its message. A cancellation stays a cancellation. */
+    private inline fun <T : Any> code(key: Key<*>, block: () -> Any): DriverResult<T> = try {
+        @Suppress("UNCHECKED_CAST")
+        DriverResult.Ok(block() as T)
+    } catch (e: CancellationException) {
+        throw e
+    } catch (e: Exception) {
+        DriverResult.Failed(key.id, e.message ?: "The watch did not answer.")
+    }
+
     override suspend fun <T : Any> set(conn: WatchConnection, key: Key<T>, value: T): DriverResult<Unit> {
         unsupported(key, conn)?.let { return it }
         return when (key) {
+            // Today's time sync on the link: the zone, DST and cities, then the time stamped ahead by the Bluetooth lead.
             Keys.TIME -> {
                 val link = linkOf(conn) ?: return needsLink(key)
                 val sync = value as TimeSync
-                runCatching { link.api.setTime(sync.timeZone, sync.timeMs) }
-                    .fold({ DriverResult.Ok(Unit) }, { DriverResult.Failed(key.id, it.message ?: "The time was not set.") })
+                code(key) { link.api.setTime(sync.timeZone, sync.timeMs, sync.offsetMs) }
             }
-            // Today's alarm write sends whole new frames (no read-modify-write); kept as it is until both agree.
-            Keys.ALARMS -> {
+            // Today's notification sender on the link (gate, MTU, chunks, spacing).
+            Keys.NOTIFICATION -> {
                 val link = linkOf(conn) ?: return needsLink(key)
+                val outcome = code<NotificationSender.Outcome>(key) { link.api.sendAppNotificationAndWait(value as AppNotification) }
+                when (outcome) {
+                    is DriverResult.Ok -> if (outcome.value == NotificationSender.Outcome.SENT) DriverResult.Ok(Unit) else DriverResult.Failed(key.id, outcome.value.name)
+                    is DriverResult.Failed -> outcome
+                    is DriverResult.Unsupported -> outcome
+                    is DriverResult.Unconfirmed -> outcome
+                }
+            }
+            // The data file's records, each frame from a fresh read: only the slots' fields and fixed byte change.
+            Keys.ALARMS -> {
                 @Suppress("UNCHECKED_CAST")
-                val slots = value as List<AlarmSlot>
-                link.api.setAlarms(ArrayList(slots.map { Alarm(it.hour, it.minute, it.enabled, it.hourlyChime, it.oneTime) }))
-                DriverResult.Ok(Unit)
+                super.set(conn, key, asWritten(value as List<AlarmSlot>) as T)
             }
             Keys.FACE ->
                 if ((value as Int) > faces(conn)) DriverResult.Unsupported(key.id, "${DataFile.modelName(conn.name)} has faces 1 to ${faces(conn)}")
@@ -83,6 +129,16 @@ class H5600Driver(file: DataFile) : DataDriver(file) {
     }
 
     companion object {
+        /** The watch condition request. */
+        const val CONDITION_CODE = 0x28
+
+        /**
+         * The slots as today's alarm writer sends them: "one time" only on an alarm that is on, and never on the first
+         * (the writer has never set it there; not checked on a watch).
+         */
+        fun asWritten(slots: List<AlarmSlot>): List<AlarmSlot> =
+            slots.mapIndexed { i, a -> a.copy(oneTime = i > 0 && a.enabled && a.oneTime) }
+
         private fun inches(cm: Int): Int = Math.round(cm / 2.54).toInt()
 
         private fun pounds(kg: Int): Int = Math.round(kg * 2.2046226).toInt()
@@ -126,11 +182,17 @@ class H5600Driver(file: DataFile) : DataDriver(file) {
         private val CODE_SETTINGS: Map<String, FrameSetting> = (PROFILE + ACTIVITIES).associateBy { it.key }
     }
 
-    /** The connection changes, and the button of each new connection. */
+    /**
+     * The connection changes, the copy of each watch read of this watch ([org.avmedia.gshockapi.io.WatchDataTap], as
+     * [WatchEvent.Data] of kind [Keys.WATCH_DATA]) and, on the link, the button of each new connection and each workout.
+     */
     override fun events(conn: WatchConnection): Flow<WatchEvent> {
-        val link = conn as? LinkConnection ?: return super.events(conn)
+        val reads = WatchDataTap.reads
+            .filter { DataFile.modelName(it.model.ifBlank { conn.name }) == DataFile.modelName(conn.name) }
+            .map { WatchEvent.Data(Keys.WATCH_DATA, it) }
+        val link = conn as? LinkConnection ?: return merge(super.events(conn), reads)
         val buttons = conn.state.filter { it == LinkState.READY }.map { WatchEvent.ButtonPressed(link.button()) }
         val workouts = link.api.workouts.map { WatchEvent.Data("workout", it) }
-        return merge(super.events(conn), buttons, workouts)
+        return merge(super.events(conn), buttons, workouts, reads)
     }
 }

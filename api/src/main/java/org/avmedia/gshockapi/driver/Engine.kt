@@ -10,7 +10,7 @@ import kotlinx.coroutines.flow.emptyFlow
 class BoundWatch(val connection: WatchConnection, val driver: WatchDriver?) {
     val capabilities: Set<String> get() = driver?.capabilities(connection).orEmpty()
 
-    fun has(key: Key<*>): Boolean = key.id in capabilities
+    fun has(key: Key<*>): Boolean = Keys.capabilityOf(key.id) in capabilities
 
     suspend fun <T : Any> get(key: Key<T>): DriverResult<T> =
         driver?.get(connection, key) ?: DriverResult.Unsupported(key.id, "no driver for ${connection.name}")
