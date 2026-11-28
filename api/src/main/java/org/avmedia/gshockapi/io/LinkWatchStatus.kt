@@ -17,7 +17,7 @@ class LinkWatchStatus internal constructor(private val link: WatchLink) {
 
     @Volatile private var error: String = ""
 
-    suspend fun requestName(): String = link.cache.request("23") { key -> name.ask { link.request(key) } }
+    suspend fun requestName(): String = link.cache.request("23") { key -> name.ask("read $key") { link.request(key) } }
 
     fun onName(data: String) {
         WatchNameIOFunctional.parseWatchName(data).fold(
@@ -30,7 +30,7 @@ class LinkWatchStatus internal constructor(private val link: WatchLink) {
     }
 
     suspend fun requestCondition(requestString: String = "28"): WatchConditionIO.WatchConditionValue =
-        link.cache.request(requestString) { key -> condition.ask { link.request(key) } }
+        link.cache.request(requestString) { key -> condition.ask("read $key") { link.request(key) } }
 
     fun onCondition(data: String) {
         val info = link.watchInfo.info

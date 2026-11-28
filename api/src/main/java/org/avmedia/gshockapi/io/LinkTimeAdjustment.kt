@@ -25,7 +25,7 @@ class LinkTimeAdjustment internal constructor(private val link: WatchLink) {
 
     suspend fun request(): TimeAdjustmentInfo {
         if (!link.watchInfo.info.hasTimeAdjustment) return TimeAdjustmentInfo()
-        return link.cache.request("GET_TIME_ADJUSTMENT") { answer.ask { sendToWatch() } }
+        return link.cache.request("GET_TIME_ADJUSTMENT") { answer.ask("read time adjustment") { sendToWatch() } }
     }
 
     fun set(settings: Settings) {

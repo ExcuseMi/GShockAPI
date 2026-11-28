@@ -18,7 +18,7 @@ class LinkAlarms internal constructor(private val link: WatchLink) {
 
     suspend fun request(): ArrayList<Alarm> =
         link.cache.request("GET_ALARMS") {
-            alarms.ask {
+            alarms.ask("read alarms") {
                 synchronized(received) { received.clear() }
                 sendToWatch()
             }

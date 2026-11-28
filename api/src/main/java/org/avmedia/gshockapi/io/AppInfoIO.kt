@@ -100,7 +100,7 @@ object AppInfoIOFunctional {
         data: ByteArray,
         startIndex: Int,
     ): Result<ByteArray> =
-        isValidWrite(startIndex, data.size).map {
+        isValidWrite(startIndex, data.size).mapCatching {
             ByteArray(BUFFER_SIZE).apply {
                 System.arraycopy(buffer, 0, this, 0, BUFFER_SIZE)
                 System.arraycopy(data, 0, this, USER_DATA_START_INDEX + startIndex, data.size)
@@ -118,7 +118,8 @@ object AppInfoIOFunctional {
         startIndex: Int,
         len: Int,
     ): Result<ByteArray> =
-        isValidRead(startIndex, len).map {
+        // A buffer shorter than the scratchpad gives a failed Result, not a throw.
+        isValidRead(startIndex, len).mapCatching {
             buffer.copyOfRange(
                 USER_DATA_START_INDEX + startIndex,
                 USER_DATA_START_INDEX + startIndex + len,

@@ -23,8 +23,8 @@ class LinkEvents internal constructor(private val link: WatchLink) {
     private val time = LinkAnswer<JSONObject>()
 
     suspend fun request(eventNumber: Int): Event {
-        val titleJson = link.cache.request("30$eventNumber") { key -> title.ask { link.request(key) } }
-        val timeJson = link.cache.request("31$eventNumber") { key -> time.ask { link.request(key) } }
+        val titleJson = link.cache.request("30$eventNumber") { key -> title.ask("read $key") { link.request(key) } }
+        val timeJson = link.cache.request("31$eventNumber") { key -> time.ask("read $key") { link.request(key) } }
         return Event(JSONObject(titleJson.toString()).apply { timeJson.keys().forEach { put(it, timeJson.get(it)) } })
     }
 

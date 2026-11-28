@@ -14,6 +14,10 @@ import org.json.JSONObject
 object ExerciseIO {
     private const val OPCODE = 0x2D
     private const val CACHE_KEY = "GET_EXERCISE_PROFILE"
+    private const val PAYLOAD_SIZE = 10
+
+    /** The longest [request] waits for the answer; a test seam. */
+    @Volatile internal var limitMs: Long = LinkAnswer.ASK_LIMIT_MS
 
     data class State(
         val deferredResult: CompletableDeferred<ExerciseProfile>? = null,
@@ -36,8 +40,9 @@ object ExerciseIO {
         return payload
     }
 
-    fun decode(payload: ByteArray): ExerciseProfile {
-        require(payload.isNotEmpty() && payload[0].toInt() == OPCODE) { "not an exercise payload" }
+    /** The profile in [payload]; null when it is not a `2D` answer or too short to hold one. */
+    fun decode(payload: ByteArray): ExerciseProfile? {
+        if (payload.size < PAYLOAD_SIZE || payload[0].toInt() != OPCODE) return null
         val stepGoal = bcdLe(payload.copyOfRange(2, 6))
         val height = bcdLe(invert(payload.copyOfRange(6, 8)))
         val weight = bcdLe(invert(payload.copyOfRange(8, 10)))
@@ -57,7 +62,12 @@ object ExerciseIO {
                 state = state.copy(deferredResult = deferred)
             }
             IO.writeCmd(GetSetMode.GET, Utils.byteArray(CasioConstants.CHARACTERISTICS.CASIO_SETTING_FOR_EXERCISE.code.toByte()))
-            deferred.await()
+            try {
+                kotlinx.coroutines.withTimeoutOrNull(limitMs) { deferred.await() }
+                    ?: throw WatchAnswerFailed("read 2D: no answer within ${limitMs / 1000} s")
+            } finally {
+                synchronized(this) { if (state.deferredResult === deferred) state = state.copy(deferredResult = null) }
+            }
         }
 
     fun set(profile: ExerciseProfile) {
@@ -91,6 +101,10 @@ object ExerciseIO {
                 .map { it.toByte() }
                 .toByteArray()
         val profile = decode(payload)
+        if (profile == null) {
+            timber.log.Timber.w("Exercise profile: not a 2D answer (%d bytes)", payload.size)
+            return
+        }
         synchronized(this) {
             state = state.copy(lastProfile = profile)
             val deferred = state.deferredResult

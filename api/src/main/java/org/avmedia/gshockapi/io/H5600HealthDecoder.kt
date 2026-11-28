@@ -105,17 +105,20 @@ object H5600HealthDecoder {
         }
 
         val buffer = ByteBuffer.wrap(stream).order(ByteOrder.LITTLE_ENDIAN)
+        // A header whose moment is no date (a damaged stream) is no LifeLog header either: null, never a throw.
         val utcTime =
-            OffsetDateTime.of(
-                LocalDateTime.of(
-                    2000 + unsigned(stream, 5),
-                    unsigned(stream, 6),
-                    unsigned(stream, 7),
-                    unsigned(stream, 8),
-                    unsigned(stream, 9),
-                ),
-                ZoneOffset.UTC,
-            )
+            runCatching {
+                OffsetDateTime.of(
+                    LocalDateTime.of(
+                        2000 + unsigned(stream, 5),
+                        unsigned(stream, 6),
+                        unsigned(stream, 7),
+                        unsigned(stream, 8),
+                        unsigned(stream, 9),
+                    ),
+                    ZoneOffset.UTC,
+                )
+            }.getOrNull() ?: return null
         val localTime = utcTime.atZoneSameInstant(zone).toLocalDateTime()
 
         val steps = buffer.getShort(14).toInt() and 0xFFFF

@@ -15,7 +15,7 @@ class LinkTimer internal constructor(private val link: WatchLink) {
     private val timer = LinkAnswer<Int>()
 
     suspend fun request(requestString: String = "18"): Int =
-        link.cache.request(requestString) { key -> timer.ask { link.request(key) } }
+        link.cache.request(requestString) { key -> timer.ask("read $key") { link.request(key) } }
 
     fun set(seconds: Int) {
         link.cache.set("18") { sendToWatchSet("{action: \"SET_TIMER\", value: $seconds}") }

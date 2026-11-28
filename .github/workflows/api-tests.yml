@@ -1,9 +1,16 @@
-name: smartsync api unit tests
+name: api unit tests
 
+# GitHub-hosted runners only: the fork is public.
 on:
   push:
-    branches: [ smartsync ]
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
   workflow_dispatch:
+
+concurrency:
+  group: api-tests-${{ github.ref }}
+  cancel-in-progress: true
 
 permissions:
   contents: read
@@ -11,6 +18,7 @@ permissions:
 jobs:
   test:
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v5
       - uses: actions/setup-java@v5
@@ -35,3 +43,9 @@ jobs:
                           print('FAILED', c.get('classname'), c.get('name'), (e.get('message') or '')[:200])
           print(f'tests={t} failed={f}')
           PY
+      - name: Test report
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: api-test-report
+          path: api/build/reports/tests/
