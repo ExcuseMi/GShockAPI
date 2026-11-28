@@ -7,10 +7,9 @@ import org.avmedia.gshockapi.casio.CasioConstants.CHARACTERISTICS
 import org.avmedia.gshockapi.link.WatchLink
 import org.json.JSONObject
 
-/** A read of [key] ("23", "1D00") as a command job on this link. */
-internal fun org.avmedia.gshockapi.link.WatchLink.request(key: String) {
+/** A read of [key] ("23", "1D00") as a command job on this link; the job, so a read can end when it fails. */
+internal fun org.avmedia.gshockapi.link.WatchLink.request(key: String) =
     command(GetSetMode.GET, IOFunctional.toCasioCmd(key))
-}
 
 /**
  * One link's reads and writes of its watch's own values (settings, alarms, timer, reminders, name, battery, app

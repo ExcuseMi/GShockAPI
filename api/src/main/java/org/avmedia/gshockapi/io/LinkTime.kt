@@ -83,6 +83,9 @@ class LinkTime internal constructor(private val link: WatchLink) {
             } ?: throw TimeReadFailed("read ${k.uppercase()}: no answer within ${readLimitMs / 1000} s")
         }
 
+    /** The longest a time sync waits for the app's clock to get ready ([WatchClock.prepare]); a test seam. */
+    @Volatile internal var clockReadyLimitMs: Long = 10_000L
+
     /** The longest a public time read waits, behind other jobs and for its answer; a test seam. */
     @Volatile internal var readLimitMs: Long = 30_000L
 
@@ -158,10 +161,15 @@ class LinkTime internal constructor(private val link: WatchLink) {
         SyncReport.report(SyncReport.TIME, true, System.currentTimeMillis() - started, null)
     }
 
-    /** A clock that fails to get ready never keeps the time from being written: the clock then gives what it has. */
+    /**
+     * A clock that fails to get ready never keeps the time from being written: the clock then gives what it has. One
+     * that does not get ready within [clockReadyLimitMs] is given up, so a hook that hangs never holds the sync.
+     */
     private suspend fun prepareClock() {
         try {
-            WatchClock.prepare()
+            if (kotlinx.coroutines.withTimeoutOrNull(clockReadyLimitMs) { WatchClock.prepare(); true } == null) {
+                Timber.w("Time sync: the clock was not ready within %d ms, the time is written from the clock as it is", clockReadyLimitMs)
+            }
         } catch (e: kotlinx.coroutines.CancellationException) {
             throw e
         } catch (e: Throwable) {

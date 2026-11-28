@@ -23,7 +23,7 @@ import timber.log.Timber
 class LinkBasicSettings internal constructor(private val link: WatchLink, private val h5600: LinkH5600Settings) {
     private val answer = LinkAnswer<Settings>()
 
-    suspend fun request(): Settings = link.cache.request("GET_SETTINGS") { answer.ask { sendToWatch() } }
+    suspend fun request(): Settings = link.cache.request("GET_SETTINGS") { answer.ask("read settings") { sendToWatch() } }
 
     fun set(settings: Settings) {
         val json = Gson().toJson(settings)

@@ -22,7 +22,7 @@ class LinkAppInfo internal constructor(private val link: WatchLink) {
     @Volatile var wasScratchpadReset = false
         internal set
 
-    suspend fun request(): String = link.cache.request("22") { key -> answer.ask { link.request(key) } }
+    suspend fun request(): String = link.cache.request("22") { key -> answer.ask("read $key") { link.request(key) } }
 
     fun onReceived(data: String) {
         wasScratchpadReset = false

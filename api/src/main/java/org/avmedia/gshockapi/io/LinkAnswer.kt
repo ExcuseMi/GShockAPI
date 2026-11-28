@@ -1,8 +1,16 @@
 package org.avmedia.gshockapi.io
 
 import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.Deferred
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.withTimeoutOrNull
+import org.avmedia.gshockapi.casio.Outcome
+import org.avmedia.gshockapi.link.JobOutcome
+import org.avmedia.gshockapi.link.JobSpec
+
+/** A read of a watch value that got no answer: its request failed (refused, the link gone) or nothing came in time. */
+class WatchAnswerFailed(message: String) : Exception(message)
 
 /**
  * One answer a read of a link waits for: the read asks, the link's watch completes it. Only the read that asked last
@@ -14,13 +22,23 @@ internal class LinkAnswer<T> {
     /** True while a read waits for its answer. */
     val waiting: Boolean get() = pending != null
 
-    /** Waits for the answer after [send] put the request on the link. */
-    suspend fun ask(send: () -> Unit): T {
-        val deferred = CompletableDeferred<T>()
-        synchronized(this) { pending = deferred }
-        send()
-        return deferred.await()
-    }
+    /**
+     * Waits for the answer after [send] put the request on the link. [send] may give the command job of its request:
+     * when that job fails (refused, the link gone, its deadline) the read ends at once with [WatchAnswerFailed]. Any
+     * read ends with it after [limitMs], which covers the wait behind other jobs (a command's own deadline) and the
+     * answer. Before, a read whose answer never came waited for ever; reads take turns (see [askOrFail]).
+     */
+    suspend fun ask(what: String = "watch value", limitMs: Long = ASK_LIMIT_MS, send: () -> Any?): T =
+        withTimeoutOrNull(limitMs) {
+            Box(
+                askOrFail { fail ->
+                    val sent = send()
+                    if (sent is Deferred<*>) sent.invokeOnCompletion { commandFailure(sent)?.let { fail(WatchAnswerFailed("$what: $it")) } }
+                },
+            )
+        }?.value ?: throw WatchAnswerFailed("$what: no answer within ${limitMs / 1000} s")
+
+    private class Box<T>(val value: T)
 
     /** One [askOrFail] at a time, from its request to its answer: the next one waits here. */
     private val turn = Mutex()
@@ -57,5 +75,20 @@ internal class LinkAnswer<T> {
             how(current)
             if (pending === current) pending = null
         }
+    }
+
+    companion object {
+        /** The longest [ask] waits: a command's deadline in the queue, then half a minute for the answer. */
+        const val ASK_LIMIT_MS: Long = JobSpec.COMMAND_DEADLINE_MS + 30_000L
+
+        /** Why the command job [sent] did not get its frame out, null when it did or it is no command job. */
+        @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
+        internal fun commandFailure(sent: Deferred<*>): String? =
+            when (val out = runCatching { sent.getCompleted() }.getOrNull()) {
+                is JobOutcome.Done<*> -> (out.value as? Outcome)?.let { if (it.ok) null else it.reason ?: "failed" }
+                is JobOutcome.Failed -> out.detail
+                null -> "cancelled"
+                else -> null
+            }
     }
 }

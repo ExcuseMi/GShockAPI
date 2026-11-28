@@ -33,6 +33,9 @@ class LinkButtonInfo internal constructor(private val link: WatchLink, private v
 
     @Volatile var clock: () -> Long = System::currentTimeMillis
 
+    /** The longest a button info read waits, behind other jobs and for its answer; a test seam. */
+    @Volatile internal var limitMs: Long = LinkAnswer.ASK_LIMIT_MS
+
     fun forgetAnswer() {
         answer = null
     }
@@ -61,8 +64,11 @@ class LinkButtonInfo internal constructor(private val link: WatchLink, private v
                 }
                 try {
                     Timber.i("Sending button info request (0x$key)")
-                    link.command(GetSetMode.GET, IOFunctional.toCasioCmd(key))
-                    deferred.await()
+                    val sent = link.command(GetSetMode.GET, IOFunctional.toCasioCmd(key))
+                    // A request that failed (refused, the link gone) or an answer that never came ends this read.
+                    sent.invokeOnCompletion { LinkAnswer.commandFailure(sent)?.let { deferred.completeExceptionally(WatchAnswerFailed("read $key: $it")) } }
+                    kotlinx.coroutines.withTimeoutOrNull(limitMs) { deferred.await() }
+                        ?: throw WatchAnswerFailed("read $key: no answer within ${limitMs / 1000} s")
                 } finally {
                     synchronized(this) {
                         if (state.deferredResult === deferred) {
