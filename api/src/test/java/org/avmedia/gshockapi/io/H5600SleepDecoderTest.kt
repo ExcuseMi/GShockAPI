@@ -9,6 +9,8 @@ import java.nio.ByteBuffer
 import java.nio.ByteOrder
 import java.time.LocalDate
 import java.time.LocalDateTime
+import java.time.ZoneId
+import java.time.ZoneOffset
 
 /** Sleep sections on synthetic records built from the documented layouts; expected values are worked out by hand. */
 class H5600SleepDecoderTest {
@@ -146,5 +148,56 @@ class H5600SleepDecoderTest {
         val data = H5600SleepDecoder.decode(ByteArray(100), ByteArray(30))
         assertNull(data.night)
         assertTrue(data.stages.isEmpty())
+    }
+
+    // Made-up records: the watch keeps UTC, the decoder gives the wall clock of the zone it is handed.
+
+    private val paris = ZoneId.of("Europe/Paris")
+
+    @Test
+    fun nightTimesAreUtcAndComeOutInTheGivenZone() {
+        val r = fullNight()
+        r[0] = bcd(25); r[1] = bcd(1); r[2] = bcd(14)
+        r[3] = 4
+        r[48] = 1; r[49] = 5
+        r[50] = 5; r[51] = 40
+        val night = H5600SleepDecoder.decode(null, r, paris).night!!
+        assertEquals(LocalDateTime.of(2025, 1, 14, 2, 5), night.fellAsleep)
+        assertEquals(LocalDateTime.of(2025, 1, 14, 6, 40), night.wokeUp)
+        assertEquals(4, night.zoneQuarterHours)
+        assertEquals("the totals do not depend on the zone", 432, night.totalSleepMinutes)
+    }
+
+    @Test
+    fun summerTimeComesFromTheZoneNotTheZoneByte() {
+        val r = fullNight()
+        r[0] = bcd(25); r[1] = bcd(7); r[2] = bcd(9)
+        r[3] = 4
+        r[48] = 0; r[49] = 30
+        r[50] = 6; r[51] = 0
+        val night = H5600SleepDecoder.decode(null, r, paris).night!!
+        assertEquals(LocalDateTime.of(2025, 7, 9, 2, 30), night.fellAsleep)
+        assertEquals(LocalDateTime.of(2025, 7, 9, 8, 0), night.wokeUp)
+    }
+
+    @Test
+    fun aUtcNightOverMidnightGetsItsDayBeforeTheZone() {
+        // 23:10 to 06:22 UTC: waking is the next day, then both move an hour on (falling asleep past local midnight).
+        val night = H5600SleepDecoder.decode(null, fullNight(), ZoneOffset.ofHours(1)).night!!
+        assertEquals(LocalDateTime.of(2026, 11, 22, 0, 10), night.fellAsleep)
+        assertEquals(LocalDateTime.of(2026, 11, 22, 7, 22), night.wokeUp)
+    }
+
+    @Test
+    fun theStageTimelineMovesWithTheZoneAndKeepsItsSpacing() {
+        val data = H5600SleepDecoder.decode(stageRecord(), null, ZoneOffset.ofHours(-4))
+        val start = LocalDateTime.of(2026, 11, 21, 19, 10)
+        assertEquals(start, data.stagesStart)
+        assertEquals(listOf(start, start.plusSeconds(600), start.plusSeconds(2400), start.plusSeconds(5400), start.plusSeconds(7200)), data.stages.map { it.time })
+    }
+
+    @Test
+    fun withoutAZoneTheTimesStayUtc() {
+        assertEquals(H5600SleepDecoder.decode(stageRecord(), fullNight()), H5600SleepDecoder.decode(stageRecord(), fullNight(), ZoneOffset.UTC))
     }
 }

@@ -7,14 +7,22 @@ import java.nio.ByteBuffer
 import java.nio.ByteOrder
 import java.time.LocalDate
 import java.time.LocalDateTime
+import java.time.ZoneId
+import java.time.ZoneOffset
 
 /**
  * Decodes the sleep sections of a DW-H5600 LifeLog: 0x53 (stage timeline, 2016 bytes per night) and
  * 0x5A (nightly record, 55 bytes per day). Pure: bytes in, values out. A value the watch marks "no data"
  * (all ones, or all ones minus one) comes out as null.
  *
- * UNCONFIRMED until a real night is checked: stage times are read as seconds from the record's start time,
- * and a night belongs to the date of its record.
+ * Time zone: the watch keeps these times in UTC, like the LifeLog header and the 0x72 records (a BCD time followed
+ * by the record's zone bytes). Every time is turned into the wall clock of the zone given to [decode].
+ * Proven on a real night: the 0x5A hours and minutes (offsets 48 to 51) are UTC; read as local they put falling asleep
+ * an hour before the heart rate fell and while the phone was still in use. The zone byte (offset 3, quarter hours)
+ * held +1 h, the phone's offset; whether it holds daylight saving time is not known, so the zone given is used.
+ * UNCONFIRMED: the frame of the 0x53 start time. It is read as UTC like the other BCD times; on that night it lay
+ * whole hours before its 0x5A window (same minute, same length), which no zone explains. Stage times are seconds from
+ * that start, and a night belongs to the date of its record.
  */
 object H5600SleepDecoder {
     const val STAGE_RECORD_BYTES = 2016
@@ -29,12 +37,14 @@ object H5600SleepDecoder {
     private const val STAGE_LIGHT = -5
     private const val STAGE_DEEP = -6
 
+    /** [zone]: the zone whose wall clock the times are given in; UTC leaves them as the watch keeps them. */
     fun decode(
         stageBody: ByteArray?,
         nightBody: ByteArray?,
+        zone: ZoneId = ZoneOffset.UTC,
     ): SleepData {
-        val nights = records(nightBody, NIGHT_RECORD_BYTES).mapNotNull { night(it) }.sortedBy { it.date }
-        val timelines = records(stageBody, STAGE_RECORD_BYTES).mapNotNull { timeline(it) }
+        val nights = records(nightBody, NIGHT_RECORD_BYTES).mapNotNull { night(it, zone) }.sortedBy { it.date }
+        val timelines = records(stageBody, STAGE_RECORD_BYTES).mapNotNull { timeline(it, zone) }
         val newest = timelines.maxByOrNull { it.first }
         return SleepData(
             night = nights.lastOrNull { !it.isEmpty },
@@ -49,7 +59,16 @@ object H5600SleepDecoder {
         size: Int,
     ): List<ByteArray> = if (body == null) emptyList() else (0 until body.size / size).map { body.copyOfRange(it * size, (it + 1) * size) }
 
-    private fun timeline(record: ByteArray): Pair<LocalDateTime, List<SleepStage>>? {
+    /** A UTC wall time as the wall time of [zone]. */
+    internal fun local(
+        utc: LocalDateTime,
+        zone: ZoneId,
+    ): LocalDateTime = utc.atOffset(ZoneOffset.UTC).atZoneSameInstant(zone).toLocalDateTime()
+
+    private fun timeline(
+        record: ByteArray,
+        zone: ZoneId,
+    ): Pair<LocalDateTime, List<SleepStage>>? {
         val start = Bcd.dateTime(record, 0, withSeconds = true) ?: return null
         val buffer = ByteBuffer.wrap(record).order(ByteOrder.LITTLE_ENDIAN)
         val stages = mutableListOf<SleepStage>()
@@ -66,12 +85,15 @@ object H5600SleepDecoder {
                     else -> null
                 }
             if (name == null || seconds > MAX_STAGE_SECONDS) continue
-            stages += SleepStage(start.plusSeconds(seconds), name)
+            stages += SleepStage(local(start.plusSeconds(seconds), zone), name)
         }
-        return if (stages.isEmpty()) null else start to stages.sortedBy { it.time }
+        return if (stages.isEmpty()) null else local(start, zone) to stages.sortedBy { it.time }
     }
 
-    private fun night(record: ByteArray): SleepNight? {
+    private fun night(
+        record: ByteArray,
+        zone: ZoneId,
+    ): SleepNight? {
         val date = Bcd.date(record, 0) ?: return null
         val buffer = ByteBuffer.wrap(record).order(ByteOrder.LITTLE_ENDIAN)
         fun u8(at: Int) = Bcd.validU8(record[at])
@@ -90,14 +112,15 @@ object H5600SleepDecoder {
         val fellAsleep = clock(48)
         var wokeUp = clock(50)
         if (fellAsleep != null && wokeUp != null && wokeUp.isBefore(fellAsleep)) wokeUp = wokeUp.plusDays(1)
+        // Both are UTC: the day is settled first, then they are turned into the zone's wall clock.
         return SleepNight(
             date = date,
             zoneQuarterHours = record[3].toInt().takeIf { it != -1 && it != -2 },
             sleepScore = u8(30)?.takeIf { it in 1..100 },
             rechargeStatus = u8(5)?.takeIf { it in 1..5 },
             rechargeLevel = u8(6),
-            fellAsleep = fellAsleep,
-            wokeUp = wokeUp,
+            fellAsleep = fellAsleep?.let { local(it, zone) },
+            wokeUp = wokeUp?.let { local(it, zone) },
             totalSleepMinutes = minutes(34),
             deepMinutes = minutes(44),
             lightMinutes = minutes(46),

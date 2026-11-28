@@ -157,18 +157,18 @@ class H5600HealthDecoderTest {
 
     private fun bcd(value: Int): Byte = (((value / 10) shl 4) or (value % 10)).toByte()
 
-    /** A 0x5A record for 2026-11-26: score 54, fell asleep 03:04, woke up 08:59. */
+    /** A made-up 0x5A record for 2025-02-03: score 54, fell asleep 04:04 UTC, woke up 09:59 UTC. */
     private fun nightRecord(): ByteArray =
         ByteArray(55) { 0xFE.toByte() }.also { r ->
-            r[0] = bcd(26); r[1] = bcd(11); r[2] = bcd(26)
-            r[30] = 54; r[48] = 3; r[49] = 4; r[50] = 8; r[51] = 59
+            r[0] = bcd(25); r[1] = bcd(2); r[2] = bcd(3)
+            r[30] = 54; r[48] = 4; r[49] = 4; r[50] = 9; r[51] = 59
         }
 
-    /** A 0x53 record starting 2026-11-26 02:41:00: awake, then light 23 minutes later, deep at 03:34. */
+    /** A made-up 0x53 record starting 2025-02-03 03:41:00 UTC: awake, then light 23 minutes later, deep at 04:34. */
     private fun stageRecord(): ByteArray =
         ByteArray(2016).also { r ->
             val b = java.nio.ByteBuffer.wrap(r).order(java.nio.ByteOrder.LITTLE_ENDIAN)
-            r[0] = bcd(26); r[1] = bcd(11); r[2] = bcd(26); r[3] = bcd(2); r[4] = bcd(41); r[5] = bcd(0)
+            r[0] = bcd(25); r[1] = bcd(2); r[2] = bcd(3); r[3] = bcd(3); r[4] = bcd(41); r[5] = bcd(0)
             val pairs = listOf(0 to -2, 1380 to -5, 3180 to -6)
             for (i in 0 until 250) {
                 val at = 8 + i * 8
@@ -188,9 +188,12 @@ class H5600HealthDecoderTest {
         val sleep = data.h5600!!.sleep!!
         assertEquals(54, sleep.night?.sleepScore)
         assertEquals(1, sleep.nights.size)
-        assertEquals(LocalDateTime.of(2026, 11, 26, 2, 41), sleep.stagesStart)
+        // The watch's UTC times come out in the read's zone (UTC-5 in February).
+        assertEquals(LocalDateTime.of(2025, 2, 2, 23, 4), sleep.night?.fellAsleep)
+        assertEquals(LocalDateTime.of(2025, 2, 3, 4, 59), sleep.night?.wokeUp)
+        assertEquals(LocalDateTime.of(2025, 2, 2, 22, 41), sleep.stagesStart)
         assertEquals(
-            listOf("awake" to LocalDateTime.of(2026, 11, 26, 2, 41), "light" to LocalDateTime.of(2026, 11, 26, 3, 4), "deep" to LocalDateTime.of(2026, 11, 26, 3, 34)),
+            listOf("awake" to LocalDateTime.of(2025, 2, 2, 22, 41), "light" to LocalDateTime.of(2025, 2, 2, 23, 4), "deep" to LocalDateTime.of(2025, 2, 2, 23, 34)),
             sleep.stages.map { it.stage to it.time },
         )
     }

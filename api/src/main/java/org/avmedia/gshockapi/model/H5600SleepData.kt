@@ -7,9 +7,9 @@ import java.time.LocalDateTime
 /**
  * Sleep and night values from the LifeLog sections 0x53 (stage timeline) and 0x5A (nightly record).
  *
- * Everything the watch marks "no data" is null. Times are the watch's wall clock without a zone.
- * UNCONFIRMED until a real night is checked: the time base of the stage timeline (read as seconds from
- * its start time) and the date a night belongs to (read as the day it began).
+ * Everything the watch marks "no data" is null. The watch keeps the times in UTC; here they are the wall clock of
+ * the zone the decoder was given (the phone's). UNCONFIRMED: the frame of the stage timeline's start time (read as
+ * UTC, seconds from it) and the date a night belongs to (the date of its record). See [org.avmedia.gshockapi.io.H5600SleepDecoder].
  */
 @Keep
 data class SleepData(
@@ -26,7 +26,7 @@ data class SleepData(
 @Keep
 data class SleepNight(
     val date: LocalDate,
-    /** Time zone byte of the record in quarter hours (UTC-4 is -16). */
+    /** Time zone byte of the record in quarter hours (UTC-4 is -16); whether it holds daylight saving time is not known. */
     val zoneQuarterHours: Int?,
     val sleepScore: Int?,
     val rechargeStatus: Int?,

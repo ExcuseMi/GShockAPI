@@ -175,6 +175,7 @@ object H5600HealthDecoder {
                     H5600SleepDecoder.decode(
                         frameBody(stream, spans, TAG_SLEEP_STAGES),
                         frameBody(stream, spans, TAG_NIGHT),
+                        zone,
                     ),
                 body =
                     H5600BodyDecoder.decode(
