@@ -66,6 +66,10 @@ class LinkRawSettings internal constructor(private val watchLink: WatchLink) {
     companion object {
         private const val TRIES = 3
 
+        /** The alarm frames (0x15, 0x16) and the cache key of their read ([LinkAlarms]). */
+        private val ALARM_CODES = setOf(0x15, 0x16)
+        private const val ALARMS_CACHE_KEY = "GET_ALARMS"
+
         /** The watch answers a settings read within 10 s. */
         const val READ_TIMEOUT_MS = 10_000L
 
@@ -237,7 +241,10 @@ class LinkRawSettings internal constructor(private val watchLink: WatchLink) {
             read = read,
             write = { frame ->
                 Timber.i("RawSettingIO write: ${frame.toHex()}")
-                if (!link.sendChecked(frame)) throw WriteNotConfirmed("no write result")
+                val ok = link.sendChecked(frame)
+                // The alarms' own read keeps its answer: a slot written here makes it stale (the next read asks the watch).
+                if (((frame.firstOrNull()?.toInt() ?: 0) and 0xFF) in ALARM_CODES) watchLink.cache.remove(ALARMS_CACHE_KEY)
+                if (!ok) throw WriteNotConfirmed("no write result")
             },
             settle = { delay(settleMs) },
         )

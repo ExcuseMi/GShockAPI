@@ -36,10 +36,14 @@
     "sound.mode", "notifications.sound", "notifications.vibration", "notifications.pattern", "notifications.language", "notifications.off_at_night",
     "face.number", "face.custom_item", "smart_alarm.on", "smart_alarm.snooze", "smart_alarm.time", "smart_alarm.window",
     "alarms", "activities.running", "activities.walking", "activities.gym_workout", "activities.interval_timer", "time.sync",
+    "time.home_time", "time.world_cities", "time.dst",
     "steps.today", "lifelog", "sleep.records", "workouts", "notifications.text", "battery.level"
   ],
   "code_only": {
     "time.sync": "Time, DST and world cities in a fixed order with the home location (0x24) in the middle; stamped when its turn comes.",
+    "time.home_time": "The home city, read with today's per-link time code.",
+    "time.world_cities": "One world city per key (time.world_cities.0, .1), read with today's per-link time code.",
+    "time.dst": "The DST state answer per state (time.dst.0, .2, .4), read with today's per-link time code.",
     "steps.today": "From the LifeLog transfer (multi-packet, own channels), not from an activity record.",
     "lifelog": "Header, sections, block confirmations, stall and retry rules.",
     "sleep.records": "0x5A and 0x53 sections, nights and stages.",
@@ -144,7 +148,7 @@
       "fixed": {
         "1": "0x40"
       },
-      "note": "Today the library writes alarms as whole new frames, and never sets one_time on the first alarm; the data codec keeps unknown bits."
+      "note": "Written per frame from a fresh read: only the slots' fields and the fixed byte change, unknown bits stay. As the old writer: one_time only on an alarm that is on, never on the first (the driver's code)."
     }
   ]
 }

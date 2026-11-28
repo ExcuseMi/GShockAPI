@@ -49,6 +49,10 @@ object Drivers {
 
     fun bind(connection: WatchConnection): BoundWatch = BoundWatch(connection, driverFor(connection.name))
 
+    /** The single-watch link (the one today's single-watch calls use), bound to its driver: for code keys such as the time. */
+    @Suppress("DEPRECATION")
+    fun bindCurrent(): BoundWatch = bind(org.avmedia.gshockapi.casio.WatchLink.driverConnection)
+
     private fun resource(path: String): String =
         requireNotNull(Drivers::class.java.classLoader?.getResourceAsStream(path)) { "$path is not in the library" }.bufferedReader().use { it.readText() }
 }

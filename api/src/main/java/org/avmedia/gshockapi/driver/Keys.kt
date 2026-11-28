@@ -19,8 +19,11 @@ data class TimeOfDay(val hour: Int, val minute: Int)
 /** One alarm slot, as a data file's record fields name it. */
 data class AlarmSlot(val hour: Int, val minute: Int, val enabled: Boolean, val oneTime: Boolean = false, val hourlyChime: Boolean = false)
 
-/** A time sync request: the zone to set, and the clock to read (null: the phone's). */
-data class TimeSync(val timeZone: String, val timeMs: Long? = null)
+/**
+ * A time sync request: the zone to set, the clock to read (null: the library's clock at the moment of the write) and
+ * the person's offset from it in ms (null: none), as `WatchApi.setTime` takes them.
+ */
+data class TimeSync(val timeZone: String, val timeMs: Long? = null, val offsetMs: Long? = null)
 
 /**
  * The known keys. A data file may name others; [Key.of] makes a key for any id. A choice is the value name in the
@@ -78,7 +81,23 @@ object Keys {
     val ALARMS: Key<List<AlarmSlot>> = Key("alarms", List::class.java as Class<List<AlarmSlot>>)
 
     // Code-only keys: protocol logic a data file cannot express.
+    /** The whole time sync: DST, world cities, the home location and the time, stamped ahead by the Bluetooth lead. */
     val TIME = Key.of<TimeSync>("time.sync")
+
+    /** The home city as the watch names it (`WatchApi.getHomeTime`). */
+    val HOME_TIME = Key.of<String>("time.home_time", writable = false)
+
+    /** The watch's DST state answer of [state] (`WatchApi.getDSTWatchState`), raw as the watch sent it. */
+    fun dstWatchState(state: Int): Key<String> = Key.of("$DST.$state", writable = false)
+
+    /** World city [index] (0 first) as the watch sent it (`WatchApi.getWorldCities`). */
+    fun worldCity(index: Int): Key<String> = Key.of("$WORLD_CITIES.$index", writable = false)
+
+    const val DST = "time.dst"
+    const val WORLD_CITIES = "time.world_cities"
+
+    /** The capability a key needs: its id, or for a key with an index ([worldCity], [dstWatchState]) its family's id. */
+    fun capabilityOf(id: String): String = listOf(DST, WORLD_CITIES).firstOrNull { id.startsWith("$it.") } ?: id
     val STEPS_TODAY = Key.of<Int>("steps.today", writable = false)
     val BATTERY = Key.of<Int>("battery.level", writable = false)
 }
