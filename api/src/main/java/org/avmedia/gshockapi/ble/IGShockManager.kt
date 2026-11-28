@@ -143,6 +143,16 @@ private class GShockManagerImpl(
             Timber.i("UUID: $key, Properties: ${propsToString(info.properties)}")
         }
 
+        // Once per connection: every service and characteristic with its properties (answers whether the watch has a
+        // standard heart rate service or another notifying characteristic).
+        runCatching {
+            val table = gatt.services.map { s ->
+                StandardHeartRate.Service(s.uuid, s.characteristics.map { c -> c.uuid to propsToString(c.properties).split(" | ").filter { it.isNotEmpty() } })
+            }
+            StandardHeartRate.onDiscovery(table)
+            org.avmedia.gshockapi.log.LibraryLog.log(org.avmedia.gshockapi.log.LibraryLog.Source.Watch, "GATT: " + StandardHeartRate.tableLine(table))
+        }
+
         // A new link: notifications must be enabled again (the descriptors are per connection).
         org.avmedia.gshockapi.casio.NotificationSubscriptions.beginDiscovery(org.avmedia.gshockapi.casio.WatchLink.link.connection.keepAlive.clock())
 
@@ -157,6 +167,11 @@ private class GShockManagerImpl(
                 if (hasNotify || hasIndicate) {
                     notifiableChars[char.uuid] = char
                     setNotificationCallback(char).with { _, data ->
+                        // The standard heart rate measurement is not the watch protocol: it goes to its own sink only.
+                        if (char.uuid == StandardHeartRate.MEASUREMENT) {
+                            data.value?.let { StandardHeartRate.onMeasurement(it, System.currentTimeMillis()) }
+                            return@with
+                        }
                         val hexData =
                             data.value?.joinToString(separator = " ", prefix = "0x") {
                                 String.format("%02X", it)
