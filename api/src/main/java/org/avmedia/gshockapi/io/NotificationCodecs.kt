@@ -114,7 +114,7 @@ object NotificationManagerCodec {
 
     /** What the watch returns after the write: the same value with the command byte it reports on a read. */
     fun expectedBack(before: ByteArray, written: ByteArray): ByteArray =
-        written.copyOf().also { if (before.size > 1) it[1] = before[1] }
+        written.copyOf().also { if (before.size > 1 && it.size > 1) it[1] = before[1] }
 
     val LANGUAGE_BYTES: Set<Int> = setOf(1, 2)
     val NIGHT_BYTES: Set<Int> = setOf(1, 7)
