@@ -42,6 +42,7 @@ object HomeTimeIOFunctional {
 @RequiresApi(Build.VERSION_CODES.O)
 object HomeTimeIO {
     /** The home city of the one link's watch, read the way its own model's protocol reads it. */
+    @Suppress("DEPRECATION") // The single-watch adapter of the per-link call the drivers' HOME_TIME key runs.
     suspend fun request(): String = org.avmedia.gshockapi.casio.WatchLink.api.getHomeTime()
 
     suspend fun requestRaw(slot: Int): String = org.avmedia.gshockapi.casio.WatchLink.time.requestHomeTime(slot)

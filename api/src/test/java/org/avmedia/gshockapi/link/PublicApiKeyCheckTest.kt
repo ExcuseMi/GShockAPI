@@ -31,7 +31,7 @@ class PublicApiKeyCheckTest {
 
     private fun unkeyed(file: String): List<String> =
         funs(text(file)).filter { f ->
-            f.name !in phoneLevel && !f.annotations.contains("@Deprecated(SINGLE_WATCH)") && !Regex("""\bkey: String\b""").containsMatchIn(f.params)
+            f.name !in phoneLevel && !f.annotations.contains("@Deprecated(SINGLE_WATCH") && !Regex("""\bkey: String\b""").containsMatchIn(f.params)
         }.map { "$file: ${it.name}" }
 
     @Test fun theFunctionsAreFound() {

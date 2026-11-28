@@ -11,7 +11,7 @@ import kotlinx.coroutines.flow.map
 
 /**
  * The library's drivers: the built-in family files (the H5600 file in the library's resources) with their code
- * drivers, the files found on the classpath ([ModelFiles.INDEX]) or registered by the app ([files]), then the drivers
+ * drivers, the other protocol families of the model table ([ProtocolDriver.BUILT_IN]), the files found on the classpath ([ModelFiles.INDEX]) or registered by the app ([files]), then the drivers
  * other libraries ship ([DriverRegistry.serviceDrivers]). A built-in one wins. Asking is cheap: a driver is made once per
  * model name and made again only after a file is registered.
  */
@@ -41,11 +41,11 @@ object Drivers {
     fun driverFor(advertisedName: String): WatchDriver? {
         val name = DataFile.modelName(advertisedName)
         if (name.isEmpty()) return null
-        val d = made.getOrPut(name) { files.driverFor(name) ?: outside.driverFor(advertisedName) ?: none }
+        val d = made.getOrPut(name) { files.driverFor(name) ?: ProtocolDriver.BUILT_IN.firstOrNull { it.matches(advertisedName) } ?: outside.driverFor(advertisedName) ?: none }
         return d.takeIf { it !== none }
     }
 
-    /** The capability ids of [advertisedName] (empty without a driver). */
+    /** The capability ids of [advertisedName]'s data file (empty without a data-file driver; a [ProtocolDriver] has none). */
     fun capabilities(advertisedName: String): Set<String> =
         (driverFor(advertisedName) as? DataDriver)?.let { d -> d.file.model(advertisedName)?.let { d.file.capabilities + it.capabilitiesAdd } }.orEmpty()
 

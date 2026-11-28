@@ -1,3 +1,6 @@
+// The single-watch calls hand over to the per-link ones, which are deprecated for the drivers' keys.
+@file:Suppress("DEPRECATION")
+
 package org.avmedia.gshockapi
 
 import org.avmedia.gshockapi.model.WatchFaceItem
@@ -291,7 +294,7 @@ class GShockAPI(
      *
      * @return returns the Daylight Saving Time state of the watch as a String.
      */
-    @Deprecated(SINGLE_WATCH)
+    @Deprecated(SINGLE_WATCH, ReplaceWith("Drivers.bindCurrent().get(Keys.dstWatchState(state.state))", "org.avmedia.gshockapi.driver.Drivers", "org.avmedia.gshockapi.driver.Keys"))
     override suspend fun getDSTWatchState(state: IO.DstState): String = one.getDSTWatchState(state)
 
     /**
@@ -313,7 +316,7 @@ class GShockAPI(
      *
      * @return The name of the requested World City as a String.
      */
-    @Deprecated(SINGLE_WATCH)
+    @Deprecated(SINGLE_WATCH, ReplaceWith("Drivers.bindCurrent().get(Keys.worldCity(cityNumber))", "org.avmedia.gshockapi.driver.Drivers", "org.avmedia.gshockapi.driver.Keys"))
     override suspend fun getWorldCities(cityNumber: Int): String = one.getWorldCities(cityNumber)
 
     /**
@@ -321,7 +324,7 @@ class GShockAPI(
      *
      * @return The name of Home City as a String.
      */
-    @Deprecated(SINGLE_WATCH)
+    @Deprecated(SINGLE_WATCH, ReplaceWith("Drivers.bindCurrent().get(Keys.HOME_TIME)", "org.avmedia.gshockapi.driver.Drivers", "org.avmedia.gshockapi.driver.Keys"))
     override suspend fun getHomeTime(): String = one.getHomeTime()
 
     /**
@@ -329,7 +332,7 @@ class GShockAPI(
      *
      * @return the battery level in percent as a String. E.g.: 83
      */
-    @Deprecated(SINGLE_WATCH)
+    @Deprecated(SINGLE_WATCH, ReplaceWith("Drivers.bindCurrent().get(Keys.BATTERY)", "org.avmedia.gshockapi.driver.Drivers", "org.avmedia.gshockapi.driver.Keys"))
     override suspend fun getBatteryLevel(): Int = one.getBatteryLevel()
 
     /**
@@ -423,7 +426,7 @@ class GShockAPI(
      *      setTime("Europe/Sofia")
      *  ```
      */
-    @Deprecated(SINGLE_WATCH)
+    @Deprecated(SINGLE_WATCH, ReplaceWith("Drivers.bindCurrent().set(Keys.TIME, TimeSync(timeZone, timeMs, offsetFormSystemTime))", "org.avmedia.gshockapi.driver.Drivers", "org.avmedia.gshockapi.driver.Keys", "org.avmedia.gshockapi.driver.TimeSync"))
     override suspend fun setTime(
         timeZone: String,
         timeMs: Long?,
@@ -436,7 +439,7 @@ class GShockAPI(
      * @return ArrayList<[org.avmedia.gshockapi.model.Alarm]>
      */
 
-    @Deprecated(SINGLE_WATCH)
+    @Deprecated(SINGLE_WATCH, ReplaceWith("Drivers.bindCurrent().get(Keys.ALARMS)", "org.avmedia.gshockapi.driver.Drivers", "org.avmedia.gshockapi.driver.Keys"))
     override suspend fun getAlarms(): ArrayList<Alarm> = one.getAlarms()
 
     /**
@@ -445,7 +448,7 @@ class GShockAPI(
      * @param ArrayList<[Alarm]>
      */
 
-    @Deprecated(SINGLE_WATCH)
+    @Deprecated(SINGLE_WATCH, ReplaceWith("Drivers.bindCurrent().set(Keys.ALARMS, alarms)", "org.avmedia.gshockapi.driver.Drivers", "org.avmedia.gshockapi.driver.Keys"))
     override fun setAlarms(alarms: ArrayList<Alarm>) = one.setAlarms(alarms)
 
     @Deprecated(SINGLE_WATCH)
@@ -560,7 +563,7 @@ class GShockAPI(
     @Deprecated(SINGLE_WATCH)
     override fun sendAppNotification(notification: AppNotification) = one.sendAppNotification(notification)
 
-    @Deprecated(SINGLE_WATCH)
+    @Deprecated(SINGLE_WATCH, ReplaceWith("Drivers.bindCurrent().set(Keys.NOTIFICATION, notification)", "org.avmedia.gshockapi.driver.Drivers", "org.avmedia.gshockapi.driver.Keys"))
     override suspend fun sendAppNotificationAndWait(notification: AppNotification): org.avmedia.gshockapi.casio.NotificationSender.Outcome =
         one.sendAppNotificationAndWait(notification)
 

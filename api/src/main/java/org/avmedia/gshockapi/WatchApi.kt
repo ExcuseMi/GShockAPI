@@ -123,21 +123,26 @@ class WatchApi internal constructor(private val link: WatchLink) {
     suspend fun getWatchCondition(): WatchConditionIO.WatchConditionValue =
         link.io.status.requestCondition(protocol.getWatchConditionRequest())
 
+    @Deprecated("Use the watch's driver", ReplaceWith("watch.get(Keys.BATTERY)", "org.avmedia.gshockapi.driver.Keys"), DeprecationLevel.WARNING)
     suspend fun getBatteryLevel(): Int = protocol.getBatteryLevel(link)
 
     suspend fun getWatchTemperature(): Int = protocol.getWatchTemperature(link)
 
     // Time
 
+    @Deprecated("Use the watch's driver", ReplaceWith("watch.get(Keys.dstWatchState(state.state))", "org.avmedia.gshockapi.driver.Keys"), DeprecationLevel.WARNING)
     suspend fun getDSTWatchState(state: IO.DstState): String = link.time.requestDstWatchState(state)
 
     suspend fun getDSTForWorldCities(cityNumber: Int): String = link.time.requestDstForWorldCities(cityNumber)
 
+    @Deprecated("Use the watch's driver", ReplaceWith("watch.get(Keys.worldCity(cityNumber))", "org.avmedia.gshockapi.driver.Keys"), DeprecationLevel.WARNING)
     suspend fun getWorldCities(cityNumber: Int): String = link.time.requestWorldCities(cityNumber)
 
+    @Deprecated("Use the watch's driver", ReplaceWith("watch.get(Keys.HOME_TIME)", "org.avmedia.gshockapi.driver.Keys"), DeprecationLevel.WARNING)
     suspend fun getHomeTime(): String = protocol.getHomeTime(link)
 
     /** Sets this watch's time (and its home time zone to [timeZone]); an unknown zone writes nothing. */
+    @Deprecated("Use the watch's driver", ReplaceWith("watch.set(Keys.TIME, TimeSync(timeZone, timeMs, offsetFormSystemTime))", "org.avmedia.gshockapi.driver.Keys", "org.avmedia.gshockapi.driver.TimeSync"), DeprecationLevel.WARNING)
     suspend fun setTime(timeZone: String, timeMs: Long? = null, offsetFormSystemTime: Long? = null) {
         if (!ZoneId.getAvailableZoneIds().contains(timeZone)) {
             Timber.e("setTime: Invalid timezone $timeZone passed")
@@ -175,6 +180,7 @@ class WatchApi internal constructor(private val link: WatchLink) {
     val isWorkoutReadActive: Boolean get() = link.transfers.workouts.isActive
 
     /** Reads this watch's new workouts ([userAsked]: the button, at user priority). Null when it did not start. */
+    @Deprecated("Use the watch's driver", ReplaceWith("watch.get(Keys.WORKOUTS)", "org.avmedia.gshockapi.driver.Keys"), DeprecationLevel.WARNING)
     suspend fun downloadWorkouts(userAsked: Boolean = true): WorkoutRunResult? = link.transfers.workouts.download(userAsked)
 
     // Tide (H5600 family)
@@ -188,8 +194,10 @@ class WatchApi internal constructor(private val link: WatchLink) {
 
     fun setTimer(timerValue: Int) = protocol.setTimer(link, timerValue)
 
+    @Deprecated("Use the watch's driver", ReplaceWith("watch.get(Keys.ALARMS)", "org.avmedia.gshockapi.driver.Keys"), DeprecationLevel.WARNING)
     suspend fun getAlarms(): ArrayList<Alarm> = protocol.getAlarms(link)
 
+    @Deprecated("Use the watch's driver", ReplaceWith("watch.set(Keys.ALARMS, alarms)", "org.avmedia.gshockapi.driver.Keys"), DeprecationLevel.WARNING)
     fun setAlarms(alarms: ArrayList<Alarm>) = protocol.setAlarms(link, alarms)
 
     suspend fun getExerciseProfile(): ExerciseProfile = protocol.getExerciseProfile(link)
@@ -285,6 +293,7 @@ class WatchApi internal constructor(private val link: WatchLink) {
         queueAppNotification(notification)
     }
 
+    @Deprecated("Use the watch's driver", ReplaceWith("watch.set(Keys.NOTIFICATION, notification)", "org.avmedia.gshockapi.driver.Keys"), DeprecationLevel.WARNING)
     suspend fun sendAppNotificationAndWait(notification: AppNotification): NotificationSender.Outcome =
         queueAppNotification(notification).await()
 

@@ -2,16 +2,12 @@ package org.avmedia.gshockapi.driver
 
 import android.os.Build
 import androidx.annotation.RequiresApi
-import kotlin.coroutines.cancellation.CancellationException
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.filter
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.merge
-import org.avmedia.gshockapi.AppNotification
-import org.avmedia.gshockapi.casio.NotificationSender
 import org.avmedia.gshockapi.io.ActivityListCodec
 import org.avmedia.gshockapi.io.ActivityModels
-import org.avmedia.gshockapi.io.IO
 import org.avmedia.gshockapi.io.ProfileCodec
 import org.avmedia.gshockapi.io.WatchDataTap
 import org.avmedia.gshockapi.link.LinkState
@@ -27,79 +23,24 @@ import org.avmedia.gshockapi.link.LinkState
 class H5600Driver(file: DataFile) : DataDriver(file) {
     private fun faces(conn: WatchConnection): Int = file.model(conn.name)?.faces ?: 3
 
-    private fun linkOf(conn: WatchConnection): LinkConnection? = conn as? LinkConnection
-
-    private fun needsLink(key: Key<*>) = DriverResult.Unsupported(key.id, "${key.id} needs the link engine")
-
     override fun frameSetting(key: String): FrameSetting? = CODE_SETTINGS[key] ?: super.frameSetting(key)
 
     override suspend fun <T : Any> get(conn: WatchConnection, key: Key<T>): DriverResult<T> {
         unsupported(key, conn)?.let { return it }
-        val value: Any = when {
-            key == Keys.STEPS_TODAY -> {
-                val link = linkOf(conn) ?: return needsLink(key)
-                link.api.getStepCount(peek = true).currentDaySteps ?: return DriverResult.Failed(key.id, "No step count yet.")
-            }
-            key == Keys.BATTERY -> (linkOf(conn) ?: return needsLink(key)).api.getBatteryLevel()
-            key == Keys.TIME -> return DriverResult.Unsupported(key.id, "the time is written, not read")
-            // Health data: today's LifeLog and workout transfers on the link, as they are.
-            key == Keys.LIFELOG || key == Keys.LIFELOG_PEEK ->
-                return code(key) { (linkOf(conn) ?: return needsLink(key)).api.getStepCount(peek = key == Keys.LIFELOG_PEEK) }
-            key == Keys.SLEEP -> return code(key) {
-                (linkOf(conn) ?: return needsLink(key)).api.getStepCount(peek = true).h5600?.sleep ?: error("The LifeLog read had no sleep.")
-            }
-            key == Keys.WORKOUTS -> return code(key) {
-                (linkOf(conn) ?: return needsLink(key)).api.downloadWorkouts(userAsked = true) ?: error("The workout read did not start.")
-            }
-            key == Keys.BUTTON -> (linkOf(conn) ?: return needsLink(key)).button()
-            key == Keys.CONDITION -> conn.readFrame(CONDITION_CODE) ?: return DriverResult.Failed(key.id, NO_ANSWER)
-            // Today's per-link time reads, as they are.
-            key == Keys.HOME_TIME -> return code(key) { (linkOf(conn) ?: return needsLink(key)).api.getHomeTime() }
-            key.id.startsWith(Keys.DST + ".") -> {
-                val state = IO.DstState.entries.firstOrNull { it.state == index(key) } ?: return DriverResult.Unsupported(key.id, "no DST state ${index(key)}")
-                return code(key) { (linkOf(conn) ?: return needsLink(key)).api.getDSTWatchState(state) }
-            }
-            key.id.startsWith(Keys.WORLD_CITIES + ".") -> {
-                val i = index(key) ?: return DriverResult.Unsupported(key.id, "no city number")
-                return code(key) { (linkOf(conn) ?: return needsLink(key)).api.getWorldCities(i) }
-            }
-            else -> return super.get(conn, key)
+        // Time, health data, the button: today's per-link calls ([LinkKeys]).
+        LinkKeys.get(conn, key)?.let { return it }
+        if (key == Keys.CONDITION) {
+            val frame = conn.readFrame(CONDITION_CODE) ?: return DriverResult.Failed(key.id, NO_ANSWER)
+            return DriverResult.Ok(key.type.cast(frame)!!)
         }
-        return DriverResult.Ok(key.type.cast(value)!!)
-    }
-
-    private fun index(key: Key<*>): Int? = key.id.substringAfterLast('.').toIntOrNull()
-
-    /** Runs today's code for [key]: its answer, or Failed with its message. A cancellation stays a cancellation. */
-    private inline fun <T : Any> code(key: Key<*>, block: () -> Any): DriverResult<T> = try {
-        @Suppress("UNCHECKED_CAST")
-        DriverResult.Ok(block() as T)
-    } catch (e: CancellationException) {
-        throw e
-    } catch (e: Exception) {
-        DriverResult.Failed(key.id, e.message ?: "The watch did not answer.")
+        return super.get(conn, key)
     }
 
     override suspend fun <T : Any> set(conn: WatchConnection, key: Key<T>, value: T): DriverResult<Unit> {
         unsupported(key, conn)?.let { return it }
+        // The time sync and the notification text: today's per-link calls ([LinkKeys]).
+        LinkKeys.set(conn, key, value)?.let { return it }
         return when (key) {
-            // Today's time sync on the link: the zone, DST and cities, then the time stamped ahead by the Bluetooth lead.
-            Keys.TIME -> {
-                val link = linkOf(conn) ?: return needsLink(key)
-                val sync = value as TimeSync
-                code(key) { link.api.setTime(sync.timeZone, sync.timeMs, sync.offsetMs) }
-            }
-            // Today's notification sender on the link (gate, MTU, chunks, spacing).
-            Keys.NOTIFICATION -> {
-                val link = linkOf(conn) ?: return needsLink(key)
-                val outcome = code<NotificationSender.Outcome>(key) { link.api.sendAppNotificationAndWait(value as AppNotification) }
-                when (outcome) {
-                    is DriverResult.Ok -> if (outcome.value == NotificationSender.Outcome.SENT) DriverResult.Ok(Unit) else DriverResult.Failed(key.id, outcome.value.name)
-                    is DriverResult.Failed -> outcome
-                    is DriverResult.Unsupported -> outcome
-                    is DriverResult.Unconfirmed -> outcome
-                }
-            }
             // The data file's records, each frame from a fresh read: only the slots' fields and fixed byte change.
             Keys.ALARMS -> {
                 @Suppress("UNCHECKED_CAST")

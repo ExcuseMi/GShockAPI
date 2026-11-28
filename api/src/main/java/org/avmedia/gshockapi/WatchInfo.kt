@@ -732,6 +732,9 @@ data object WatchInfo {
     @RequiresApi(Build.VERSION_CODES.O)
     internal fun setModelForTest(name: String) = one.setModelForTest(name)
 
+    /** True when [name] is a model of the table (an exact name, as [resolvedFor] matches it). */
+    internal fun knows(name: String): Boolean = modelNameOf(name) in exactModelMap
+
     /** The model attributes a device name resolves to; for tests. */
     @RequiresApi(Build.VERSION_CODES.O)
     internal fun infoFor(name: String): ModelInfo = resolveModelInfo(resolveModel(name))

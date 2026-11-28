@@ -160,6 +160,20 @@ model changes. The workout sink stays: it says whether a workout was stored befo
 else Failed with the sender's outcome name. `Keys.BUTTON` is the button of this connection (its `IO.WatchButton`
 name); the driver's events carry it as `WatchEvent.ButtonPressed` at each connection.
 
+## The other families (done)
+
+`ProtocolDriver` makes a driver of each other protocol of the model table (Oceanus, MIP, Analogue, Standard; the
+B5600 and B2100 are Standard): it takes the table's exact names of its protocol, its capabilities are the table's
+answers, and every key is today's call on the link (`LinkKeys`, shared with `H5600Driver`: time, time reads, battery,
+steps, the button, notifications; the alarms as today's whole-frame write). Built-in, after the data files and before
+discovered drivers. No data files for their settings: the tests have no recorded frames of these families' settings
+to check a file against. `Drivers.capabilities` stays the data file's.
+
+Deprecated at WARNING with `ReplaceWith`: `WatchApi.getAlarms`, `setAlarms`, `setTime`, `getHomeTime`, `getWorldCities`,
+`getDSTWatchState`, `getBatteryLevel`, `sendAppNotificationAndWait`, `downloadWorkouts` (to `watch.get`/`set` with
+their key); the single-watch `GShockAPI` ones name `Drivers.bindCurrent()`. `getStepCount` stays: no key gives a
+`StepCounterData` for every family.
+
 ## Open questions
 
 1. Alarms: the per-frame write that keeps unknown bits is to be checked on a watch (alarm 1 and the three in 0x16).

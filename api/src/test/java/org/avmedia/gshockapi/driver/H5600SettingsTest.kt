@@ -335,7 +335,7 @@ class H5600SettingsTest {
 
     @Test fun theLibraryFindsItsOwnFile() {
         assertTrue(Drivers.driverFor("CASIO GBX-H5600") is H5600Driver)
-        assertNull(Drivers.driverFor("CASIO GW-B5600"))
+        assertTrue(Drivers.driverFor("CASIO GW-B5600") is ProtocolDriver) // its protocol family, no data file
         assertNull(Drivers.driverFor(""))
         assertEquals(4, Drivers.faceCount("CASIO GBX-H5600"))
         assertEquals(3, Drivers.faceCount("CASIO DW-H5600"))
