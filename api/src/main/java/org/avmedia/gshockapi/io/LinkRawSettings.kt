@@ -132,11 +132,12 @@ class LinkRawSettings internal constructor(private val watchLink: WatchLink) {
 
     /**
      * One settings read: sends [request], waits up to [timeoutMs] (the watch answers within 10 s) and returns the first answer that
-     * begins with the code and that [accept] takes. A refusal (`FF`) names its status; nothing is retried.
+     * begins with the code and that [accept] takes. A refusal (`FF`) names its status; nothing is retried. [fresh]: sent for this
+     * call, never joined to the same request already asked for (that answer may predate a write).
      */
-    suspend fun read(request: ByteArray, timeoutMs: Long = READ_TIMEOUT_MS, accept: (ByteArray) -> Boolean = { true }): Reply =
+    suspend fun read(request: ByteArray, timeoutMs: Long = READ_TIMEOUT_MS, fresh: Boolean = false, accept: (ByteArray) -> Boolean = { true }): Reply =
         try {
-            val frame = attempt(request, timeoutMs) { it.size > 1 && accept(Utils.byteArrayOfIntArray(it)) }
+            val frame = attempt(request, timeoutMs, join = !fresh) { it.size > 1 && accept(Utils.byteArrayOfIntArray(it)) }
             Reply(Utils.byteArrayOfIntArray(frame), null)
         } catch (e: Failure) {
             Reply(null, e.text)
@@ -144,17 +145,21 @@ class LinkRawSettings internal constructor(private val watchLink: WatchLink) {
             Reply(null, "The watch did not answer within ${timeoutMs / 1000} s.")
         }
 
-    /** The answer to the default request of [code] as frame bytes (code first), or null; [read] says why. */
-    suspend fun readFrame(code: Int): ByteArray? {
+    /**
+     * The answer to the default request of [code] as frame bytes (code first), or null; [read] says why. [fresh]: the
+     * request is sent for this call and never joins one already asked for (which may predate a write); every write's
+     * read and read-back are fresh.
+     */
+    suspend fun readFrame(code: Int, fresh: Boolean = false): ByteArray? {
         val request = requestFor(code)
-        return read(request, READ_TIMEOUT_MS) { answersRequest(request, it.map { b -> b.toInt() and 0xFF }.toIntArray()) }.frame
+        return read(request, READ_TIMEOUT_MS, fresh) { answersRequest(request, it.map { b -> b.toInt() and 0xFF }.toIntArray()) }.frame
     }
 
-    private suspend fun attempt(request: ByteArray, timeoutMs: Long, accept: (IntArray) -> Boolean): IntArray {
+    private suspend fun attempt(request: ByteArray, timeoutMs: Long, join: Boolean = true, accept: (IntArray) -> Boolean): IntArray {
         val code = request[0].toInt() and 0xFF
         val key = request.joinToString("") { "%02X".format(it) }
-        // A reader of the same request waits for the answer that is already asked for.
-        synchronized(lock) { current?.takeIf { it.key == key && it.deferred.isActive } }?.let { return await(it, timeoutMs, code) }
+        // A reader of the same request waits for the answer that is already asked for (never a fresh read).
+        if (join) synchronized(lock) { current?.takeIf { it.key == key && it.deferred.isActive } }?.let { return await(it, timeoutMs, code) }
         watchLink.connection.setup.awaitIdle()
         return sendLock.withLock {
             val pending = Pending(key, code, accept)
@@ -226,8 +231,8 @@ class LinkRawSettings internal constructor(private val watchLink: WatchLink) {
         change: (ByteArray) -> ByteArray?,
     ): SettingWriteResult = withLock(code) { safeWriter().update(code, touched, expectedBack, matches) { change(it.copyOf()) } }
 
-    /** The checked writer every setting write goes through: [read] defaults to [readFrame]. */
-    fun safeWriter(read: suspend (Int) -> ByteArray? = ::readFrame): SafeSettingWrite =
+    /** The checked writer every setting write goes through: [read] defaults to a fresh [readFrame]. */
+    fun safeWriter(read: suspend (Int) -> ByteArray? = { readFrame(it, fresh = true) }): SafeSettingWrite =
         SafeSettingWrite(
             read = read,
             write = { frame ->

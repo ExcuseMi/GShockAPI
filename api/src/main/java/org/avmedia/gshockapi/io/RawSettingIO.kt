@@ -31,10 +31,11 @@ object RawSettingIO {
 
     suspend fun request(code: Int): IntArray = settings.request(code)
 
-    suspend fun read(request: ByteArray, timeoutMs: Long = READ_TIMEOUT_MS, accept: (ByteArray) -> Boolean = { true }): LinkRawSettings.Reply =
-        settings.read(request, timeoutMs, accept)
+    /** [fresh]: sent for this call, never joined to a read already asked for (every write's read is fresh). */
+    suspend fun read(request: ByteArray, timeoutMs: Long = READ_TIMEOUT_MS, fresh: Boolean = false, accept: (ByteArray) -> Boolean = { true }): LinkRawSettings.Reply =
+        settings.read(request, timeoutMs, fresh, accept)
 
-    suspend fun readFrame(code: Int): ByteArray? = settings.readFrame(code)
+    suspend fun readFrame(code: Int, fresh: Boolean = false): ByteArray? = settings.readFrame(code, fresh)
 
     fun offer(data: String): Boolean = settings.offer(data)
 
@@ -43,7 +44,7 @@ object RawSettingIO {
     suspend fun modifySafe(code: Int, touched: Set<Int>, change: (ByteArray) -> ByteArray?): SettingWriteResult =
         settings.modifySafe(code, touched, change)
 
-    fun safeWriter(read: suspend (Int) -> ByteArray? = ::readFrame): SafeSettingWrite = settings.safeWriter(read)
+    fun safeWriter(read: suspend (Int) -> ByteArray? = { settings.readFrame(it, fresh = true) }): SafeSettingWrite = settings.safeWriter(read)
 
     suspend fun <T> withLock(code: Int, block: suspend () -> T): T = settings.withLock(code, block)
 

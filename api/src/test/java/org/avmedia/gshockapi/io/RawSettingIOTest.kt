@@ -65,6 +65,37 @@ class RawSettingIOTest {
 
     private fun notify(data: String): Boolean = RawSettingIO.offer(data).also { if (!it) passedOn += data }
 
+    @Test fun aFreshReadNeverJoinsARequestAlreadyAskedFor() = runBlocking {
+        val first = async { RawSettingIO.read(byteArrayOf(0x50), 2_000) }
+        while (link.requests.isEmpty()) delay(5)
+        val joined = async { RawSettingIO.read(byteArrayOf(0x50), 2_000) }
+        val fresh = async { RawSettingIO.read(byteArrayOf(0x50), 2_000, fresh = true) }
+        delay(100)
+        assertEquals("the fresh read waits for its own request", 1, link.requests.size)
+        // The answer to the first request (as it was before a write): the joined read takes it, the fresh one does not.
+        notify("0x50 01 02")
+        assertArrayEquals(byteArrayOf(0x50, 1, 2), first.await().frame)
+        assertArrayEquals(byteArrayOf(0x50, 1, 2), joined.await().frame)
+        while (link.requests.size < 2) delay(5)
+        notify("0x50 03 04")
+        assertArrayEquals(byteArrayOf(0x50, 3, 4), fresh.await().frame)
+    }
+
+    @Test fun theCheckedWriterReadsFresh() = runBlocking {
+        val first = async { RawSettingIO.read(byteArrayOf(0x50), 2_000) }
+        while (link.requests.isEmpty()) delay(5)
+        val write = async { RawSettingIO.modifySafe(0x50, setOf(2)) { f -> f.also { it[2] = 9 } } }
+        delay(100)
+        assertEquals(1, link.requests.size)
+        notify("0x50 01 02")
+        first.await()
+        while (link.requests.size < 2) delay(5)
+        link.onRequest = { notify("0x50 03 09") }
+        notify("0x50 03 04")
+        write.await()
+        assertEquals("written from the fresh frame, not the earlier answer", listOf(0x50, 3, 9), link.checked.single())
+    }
+
     @Test fun aTransferInTheMiddleOfAReadStillGetsItsNotifications() = runBlocking {
         link.onRequest = {
             // The transfer's DRSP and CONVOY notifications arrive while the read waits; the answer comes between them.

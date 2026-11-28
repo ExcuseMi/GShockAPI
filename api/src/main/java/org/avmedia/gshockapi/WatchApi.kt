@@ -255,7 +255,7 @@ class WatchApi internal constructor(private val link: WatchLink) {
         link.rawSettings.modifySafe(code, touched, change)
 
     /** This watch's checked settings writer; [read] gives the frame a write starts from. */
-    fun settingWriter(read: suspend (Int) -> ByteArray? = link.rawSettings::readFrame): SafeSettingWrite = link.rawSettings.safeWriter(read)
+    fun settingWriter(read: suspend (Int) -> ByteArray? = { link.rawSettings.readFrame(it, fresh = true) }): SafeSettingWrite = link.rawSettings.safeWriter(read)
 
     // App information and scratchpad
 
