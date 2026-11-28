@@ -49,6 +49,10 @@ object Drivers {
     fun capabilities(advertisedName: String): Set<String> =
         (driverFor(advertisedName) as? DataDriver)?.let { d -> d.file.model(advertisedName)?.let { d.file.capabilities + it.capabilitiesAdd } }.orEmpty()
 
+    /** The alarm slots of [advertisedName] (the records of its alarms setting), null without a driver that has them. */
+    fun alarmCount(advertisedName: String): Int? =
+        (driverFor(advertisedName) as? DataDriver)?.file?.settings?.get(Keys.ALARMS.id)?.frames?.sumOf { it.count }
+
     /** The watch faces of [advertisedName] (the model's count), null without a driver that says it. */
     fun faceCount(advertisedName: String): Int? = (driverFor(advertisedName) as? DataDriver)?.file?.model(advertisedName)?.faces
 
