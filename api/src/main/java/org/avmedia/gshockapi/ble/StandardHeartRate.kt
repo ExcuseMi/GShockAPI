@@ -5,8 +5,9 @@ import java.util.UUID
 /**
  * The GATT table of the link as one log line, and the standard Bluetooth Heart Rate Service (0x180D, measurement 0x2A37)
  * when a watch has it. The watches seen so far do not: the table line of each connection says so. When one has it,
- * the link subscribes its measurement like every other notifying characteristic and each value goes to [sink]
- * (bpm, received at); it never reaches the watch protocol. Pure apart from [sink].
+ * its measurement is subscribed only while a stream is wanted ([stream]; a link that comes back meanwhile subscribes it
+ * in its setup) and each value goes to [sink] (bpm, received at); it never reaches the watch protocol. Pure apart from
+ * [sink], [onPresence] and [control].
  */
 object StandardHeartRate {
     val SERVICE: UUID = UUID.fromString("0000180d-0000-1000-8000-00805f9b34fb")
@@ -19,12 +20,36 @@ object StandardHeartRate {
     /** Each standard heart rate measurement: bpm and the phone time it came. */
     @Volatile var sink: ((Int, Long) -> Unit)? = null
 
+    /** Told [present] at every service discovery (the app keeps whether its watch has the service). */
+    @Volatile var onPresence: ((Boolean) -> Unit)? = null
+
+    /** True while the app wants the measurement (from [stream] on until [stream] off). */
+    @Volatile var wanted: Boolean = false
+        private set
+
+    /** The connection's way to turn the measurement's notifications on or off; set by the manager. */
+    @Volatile internal var control: (suspend (Boolean) -> Boolean)? = null
+
+    /**
+     * Starts or stops the stream. Kept as [wanted] whatever the link does now, so a link that comes back subscribes
+     * it again; true when the connection took the change (false while not connected or without the service).
+     */
+    suspend fun stream(on: Boolean): Boolean {
+        wanted = on
+        if (!present) return false
+        return runCatching { control?.invoke(on) ?: false }.getOrDefault(false)
+    }
+
+    /** The notifying characteristics a link's setup subscribes: the measurement only while [wanted]. */
+    fun subscribable(notifiable: List<UUID>): List<UUID> = if (wanted) notifiable else notifiable.filter { it != MEASUREMENT }
+
     /** One service of the table: its UUID and each characteristic with its property names. */
     data class Service(val uuid: UUID, val characteristics: List<Pair<UUID, List<String>>>)
 
     /** A service discovery found [services]: remembers whether the heart rate service is there. */
     fun onDiscovery(services: List<Service>) {
         present = services.any { it.uuid == SERVICE }
+        runCatching { onPresence?.invoke(present) }
     }
 
     /** "1800: 2a00 READ, 2a01 READ; 26eb000d: 26eb0023 WRITE|NOTIFY; heart rate service 180d: no". */

@@ -34,4 +34,17 @@ class StandardHeartRateTest {
         assertNull(StandardHeartRate.bpm(byteArrayOf(0x00, 0x00)))
         assertNull(StandardHeartRate.bpm(byteArrayOf(0x00)))
     }
+
+    @Test fun measurementSubscribedOnlyWhileAStreamIsWanted() = kotlinx.coroutines.runBlocking {
+        val other = u("26eb0023-b012-49a8-b1f8-394fb2032b0f")
+        val all = listOf(other, StandardHeartRate.MEASUREMENT)
+        StandardHeartRate.stream(false)
+        assertEquals(listOf(other), StandardHeartRate.subscribable(all))
+        // Not connected (no service known): kept as wanted for the next link's setup.
+        assertFalse(StandardHeartRate.stream(true))
+        assertTrue(StandardHeartRate.wanted)
+        assertEquals(all, StandardHeartRate.subscribable(all))
+        StandardHeartRate.stream(false)
+        assertFalse(StandardHeartRate.wanted)
+    }
 }

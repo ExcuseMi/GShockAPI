@@ -112,6 +112,7 @@ private class GShockManagerImpl(
 
     init {
         connectionObserver = ConnectionEventHandler()
+        StandardHeartRate.control = { on -> streamHeartRate(on) }
     }
 
     override fun initialize() {
@@ -188,7 +189,26 @@ private class GShockManagerImpl(
 
     private val notifiableChars = java.util.concurrent.ConcurrentHashMap<UUID, BluetoothGattCharacteristic>()
 
-    override fun notifiable(): List<UUID> = notifiableChars.keys.toList()
+    // The standard heart rate measurement only while a stream is wanted (it costs battery on both sides).
+    override fun notifiable(): List<UUID> = StandardHeartRate.subscribable(notifiableChars.keys.toList())
+
+    /** Turns the standard heart rate measurement on or off on this connection; false when the watch has none or it failed. */
+    private suspend fun streamHeartRate(on: Boolean): Boolean {
+        val char = notifiableChars[StandardHeartRate.MEASUREMENT] ?: return false
+        val done = CompletableDeferred<Boolean>()
+        val request = if (on) enableNotifications(char) else disableNotifications(char)
+        request
+            .fail { _, status ->
+                Timber.d("Heart rate stream ${if (on) "on" else "off"} failed: $status")
+                done.complete(false)
+            }
+            .done { done.complete(true) }
+            .invalid { done.complete(false) }
+            .enqueue()
+        val ok = withTimeoutOrNull(CommandTable.REQUEST_TIMEOUT_MS) { done.await() } ?: false
+        if (ok && on) org.avmedia.gshockapi.casio.NotificationSubscriptions.claim(char.uuid)
+        return ok
+    }
 
     override suspend fun subscribe(characteristic: UUID): Boolean {
         val char = notifiableChars[characteristic] ?: return false
