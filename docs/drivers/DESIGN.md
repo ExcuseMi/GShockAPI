@@ -145,6 +145,15 @@ suspend fun getAlarms(): ArrayList<Alarm> = ...
   `Keys.HOME_TIME`, `Keys.worldCity(i)`, `Keys.dstWatchState(state)`. A key with an index needs its family's capability
   (`Keys.capabilityOf`). `Drivers.bindCurrent()` binds the single-watch link.
 
+## Health data (done)
+
+Keys on the link, delegating to today's transfers: `Keys.LIFELOG` and `Keys.LIFELOG_PEEK` (the LifeLog read, as
+`getStepCount(peek)`), `Keys.SLEEP` (the nights of a LifeLog read, 0x5A and 0x53), `Keys.WORKOUTS` (a workout read
+now), `Keys.BATTERY`; `Keys.CONDITION` is a plain 0x28 read on any connection. The copy of every watch read
+(`WatchDataTap`) is also a flow (`WatchDataTap.reads`); a driver's `events` carry its watch's reads as
+`WatchEvent.Data(Keys.WATCH_DATA, read)`. `Drivers.currentEvents()` follows the single-watch link, bound again when the
+model changes. The workout sink stays: it says whether a workout was stored before the watch drops it.
+
 ## Open questions
 
 1. Alarms: the per-frame write that keeps unknown bits is to be checked on a watch (alarm 1 and the three in 0x16).

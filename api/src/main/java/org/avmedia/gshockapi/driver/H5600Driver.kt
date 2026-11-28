@@ -11,6 +11,7 @@ import org.avmedia.gshockapi.io.ActivityListCodec
 import org.avmedia.gshockapi.io.ActivityModels
 import org.avmedia.gshockapi.io.IO
 import org.avmedia.gshockapi.io.ProfileCodec
+import org.avmedia.gshockapi.io.WatchDataTap
 import org.avmedia.gshockapi.link.LinkState
 
 /**
@@ -39,6 +40,16 @@ class H5600Driver(file: DataFile) : DataDriver(file) {
             }
             key == Keys.BATTERY -> (linkOf(conn) ?: return needsLink(key)).api.getBatteryLevel()
             key == Keys.TIME -> return DriverResult.Unsupported(key.id, "the time is written, not read")
+            // Health data: today's LifeLog and workout transfers on the link, as they are.
+            key == Keys.LIFELOG || key == Keys.LIFELOG_PEEK ->
+                return code(key) { (linkOf(conn) ?: return needsLink(key)).api.getStepCount(peek = key == Keys.LIFELOG_PEEK) }
+            key == Keys.SLEEP -> return code(key) {
+                (linkOf(conn) ?: return needsLink(key)).api.getStepCount(peek = true).h5600?.sleep ?: error("The LifeLog read had no sleep.")
+            }
+            key == Keys.WORKOUTS -> return code(key) {
+                (linkOf(conn) ?: return needsLink(key)).api.downloadWorkouts(userAsked = true) ?: error("The workout read did not start.")
+            }
+            key == Keys.CONDITION -> conn.readFrame(CONDITION_CODE) ?: return DriverResult.Failed(key.id, NO_ANSWER)
             // Today's per-link time reads, as they are.
             key == Keys.HOME_TIME -> return code(key) { (linkOf(conn) ?: return needsLink(key)).api.getHomeTime() }
             key.id.startsWith(Keys.DST + ".") -> {
@@ -104,6 +115,9 @@ class H5600Driver(file: DataFile) : DataDriver(file) {
     }
 
     companion object {
+        /** The watch condition request. */
+        const val CONDITION_CODE = 0x28
+
         /**
          * The slots as today's alarm writer sends them: "one time" only on an alarm that is on, and never on the first
          * (the writer has never set it there; not checked on a watch).
@@ -154,11 +168,17 @@ class H5600Driver(file: DataFile) : DataDriver(file) {
         private val CODE_SETTINGS: Map<String, FrameSetting> = (PROFILE + ACTIVITIES).associateBy { it.key }
     }
 
-    /** The connection changes, and the button of each new connection. */
+    /**
+     * The connection changes, the copy of each watch read of this watch ([org.avmedia.gshockapi.io.WatchDataTap], as
+     * [WatchEvent.Data] of kind [Keys.WATCH_DATA]) and, on the link, the button of each new connection and each workout.
+     */
     override fun events(conn: WatchConnection): Flow<WatchEvent> {
-        val link = conn as? LinkConnection ?: return super.events(conn)
+        val reads = WatchDataTap.reads
+            .filter { DataFile.modelName(it.model.ifBlank { conn.name }) == DataFile.modelName(conn.name) }
+            .map { WatchEvent.Data(Keys.WATCH_DATA, it) }
+        val link = conn as? LinkConnection ?: return merge(super.events(conn), reads)
         val buttons = conn.state.filter { it == LinkState.READY }.map { WatchEvent.ButtonPressed(link.button()) }
         val workouts = link.api.workouts.map { WatchEvent.Data("workout", it) }
-        return merge(super.events(conn), buttons, workouts)
+        return merge(super.events(conn), buttons, workouts, reads)
     }
 }

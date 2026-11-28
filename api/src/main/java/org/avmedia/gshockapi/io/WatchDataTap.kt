@@ -2,6 +2,10 @@ package org.avmedia.gshockapi.io
 
 import org.avmedia.gshockapi.model.StepCounterData
 import org.avmedia.gshockapi.model.WorkoutSession
+import kotlinx.coroutines.channels.BufferOverflow
+import kotlinx.coroutines.flow.MutableSharedFlow
+import kotlinx.coroutines.flow.SharedFlow
+import kotlinx.coroutines.flow.asSharedFlow
 import timber.log.Timber
 
 /**
@@ -26,6 +30,15 @@ object WatchDataTap {
     @Volatile
     var sink: ((Read) -> Unit)? = null
 
+    private val _reads = MutableSharedFlow<Read>(extraBufferCapacity = READ_BUFFER, onBufferOverflow = BufferOverflow.DROP_OLDEST)
+
+    /** Every read as it is copied, for the drivers' events ([org.avmedia.gshockapi.driver.WatchDriver.events]); never waits. */
+    val reads: SharedFlow<Read> = _reads.asSharedFlow()
+
+    /** Someone takes the copies: the [sink] or a collector of [reads]. */
+    private fun wanted(): Boolean = sink != null || _reads.subscriptionCount.value > 0
+
+    private const val READ_BUFFER = 64
     private const val FRAME_HEADER_SIZE = 5
     private const val TAG_SLEEP_STAGES = 0x53
     private const val TAG_NIGHT = 0x5A
@@ -34,6 +47,7 @@ object WatchDataTap {
     private const val LIFELOG_BYTE = 9
 
     fun emit(read: Read) {
+        _reads.tryEmit(read)
         val s = sink ?: return
         runCatching { s(read) }.onFailure { Timber.w(it, "Watch data copy failed") }
     }
@@ -45,7 +59,7 @@ object WatchDataTap {
      * decoded nights and stages ("sleep"), and the `0x28` answer of its setup ("condition").
      */
     internal fun lifeLog(model: String, notifications: List<ByteArray>, announced: Map<Int, Int>, condition: ByteArray?, decoded: StepCounterData) {
-        if (sink == null) return
+        if (!wanted()) return
         runCatching {
             val stream = H5600HealthDecoder.lifeLogStream(notifications, announced)
             val spans = H5600HealthDecoder.locateFrames(stream, announced)
@@ -70,7 +84,7 @@ object WatchDataTap {
 
     /** A workout read: the header, the data and lap blocks as read (each block whole), and the decoded session. */
     internal fun workout(header: WorkoutHeader, data: List<ByteArray>, laps: List<ByteArray>, session: WorkoutSession) {
-        if (sink == null) return
+        if (!wanted()) return
         emit(Read("workout", header.raw, session, mapOf("data" to concat(data), "laps" to concat(laps))))
     }
 
@@ -78,7 +92,7 @@ object WatchDataTap {
 
     /** A setting read that was answered: the frame, code first. */
     internal fun setting(model: String, frame: IntArray) {
-        if (sink == null || frame.isEmpty()) return
+        if (!wanted() || frame.isEmpty()) return
         emit(Read("setting", ByteArray(frame.size) { frame[it].toByte() }, null, code = frame[0], model = model))
     }
 }

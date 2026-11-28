@@ -1,5 +1,9 @@
 package org.avmedia.gshockapi.driver
 
+import org.avmedia.gshockapi.io.WorkoutRunResult
+import org.avmedia.gshockapi.model.SleepData
+import org.avmedia.gshockapi.model.StepCounterData
+
 /**
  * A typed capability key: what a driver can read ([get]) or change ([set]), and the type of its value. The [id] is the
  * name the data files use; two keys with the same id are the same capability.
@@ -93,11 +97,30 @@ object Keys {
     /** World city [index] (0 first) as the watch sent it (`WatchApi.getWorldCities`). */
     fun worldCity(index: Int): Key<String> = Key.of("$WORLD_CITIES.$index", writable = false)
 
+    const val LIFELOG_ID = "lifelog"
     const val DST = "time.dst"
     const val WORLD_CITIES = "time.world_cities"
 
     /** The capability a key needs: its id, or for a key with an index ([worldCity], [dstWatchState]) its family's id. */
-    fun capabilityOf(id: String): String = listOf(DST, WORLD_CITIES).firstOrNull { id.startsWith("$it.") } ?: id
+    fun capabilityOf(id: String): String = listOf(DST, WORLD_CITIES, LIFELOG_ID).firstOrNull { id.startsWith("$it.") } ?: id
     val STEPS_TODAY = Key.of<Int>("steps.today", writable = false)
     val BATTERY = Key.of<Int>("battery.level", writable = false)
+
+    /** The LifeLog transfer (steps, heart rate, sleep), read so the watch may drop what was sent (`getStepCount(peek = false)`). */
+    val LIFELOG = Key.of<StepCounterData>(LIFELOG_ID, writable = false)
+
+    /** The LifeLog transfer as a look only (`getStepCount(peek = true)`, the usual read). */
+    val LIFELOG_PEEK = Key.of<StepCounterData>("$LIFELOG_ID.peek", writable = false)
+
+    /** The nights of a LifeLog read (its 0x5A and 0x53 sections, decoded); null nights when it had none. */
+    val SLEEP = Key.of<SleepData>("sleep.records", writable = false)
+
+    /** The watch condition answer (0x28, code first): battery step, temperature, the workout and pending flags. */
+    val CONDITION = Key.of<ByteArray>("battery.condition", writable = false)
+
+    /** Reads the watch's new workouts now (the button's read); each goes to the workout sink and on [WatchDriver.events]. */
+    val WORKOUTS = Key.of<WorkoutRunResult>("workouts", writable = false)
+
+    /** [WatchEvent.Data.kind] of a copy of a watch read ([org.avmedia.gshockapi.io.WatchDataTap.Read]). */
+    const val WATCH_DATA = "watch_data"
 }

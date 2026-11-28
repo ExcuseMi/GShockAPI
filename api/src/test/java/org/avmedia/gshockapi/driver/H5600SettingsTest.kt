@@ -3,7 +3,10 @@ package org.avmedia.gshockapi.driver
 import java.io.File
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.test.UnconfinedTestDispatcher
 import kotlinx.coroutines.test.runTest
+import org.avmedia.gshockapi.io.WatchDataTap
 import org.avmedia.gshockapi.io.ActivityListCodec
 import org.avmedia.gshockapi.io.BasicHealthFieldsCodec
 import org.avmedia.gshockapi.io.HeartRateSettingCodec
@@ -272,6 +275,30 @@ class H5600SettingsTest {
         assertEquals(0, watch.writes)
         assertEquals("time.world_cities", Keys.capabilityOf(Keys.worldCity(5).id))
         assertEquals("time.sync", Keys.capabilityOf(Keys.TIME.id))
+    }
+
+    /** Health data: the transfers are code on the link (refused here, nothing sent); 0x28 is a plain read; each watch read's copy is an event of its watch. */
+    @Test fun healthKeysAndTheWatchDataCopies() = runTest {
+        val condition = frame(0x28, 6, 21, 0, 0, 0, 0, 1, 0, 0)
+        val watch = FakeConnection("CASIO DW-H5600", mutableMapOf(0x28 to condition))
+        val bound = DriverEngine(DriverRegistry(listOf(driver), discovered = { emptyList() })).bind(watch)
+        assertArrayEquals(condition, (bound.get(Keys.CONDITION) as DriverResult.Ok).value)
+        for (k in listOf(Keys.LIFELOG, Keys.LIFELOG_PEEK, Keys.SLEEP, Keys.WORKOUTS)) {
+            val r = bound.get(k)
+            assertTrue("$k $r", bound.has(k) && r is DriverResult.Unsupported && r.reason.contains("link engine"))
+        }
+        assertEquals(0, watch.writes)
+        val got = mutableListOf<WatchEvent>()
+        val job = launch(UnconfinedTestDispatcher(testScheduler)) { bound.events.collect { got += it } }
+        testScheduler.runCurrent()
+        WatchDataTap.emit(WatchDataTap.Read("setting", byteArrayOf(0x13), null, code = 0x13, model = "CASIO DW-H5600"))
+        WatchDataTap.emit(WatchDataTap.Read("setting", byteArrayOf(0x13), null, code = 0x13, model = "CASIO GW-B5600"))
+        WatchDataTap.emit(WatchDataTap.Read("workout", byteArrayOf(1), null))
+        testScheduler.runCurrent()
+        job.cancel()
+        val data = got.filterIsInstance<WatchEvent.Data>()
+        assertEquals(listOf("setting", "workout"), data.map { (it.value as WatchDataTap.Read).kind })
+        assertTrue(data.all { it.kind == Keys.WATCH_DATA })
     }
 
     @Test fun theLibraryFindsItsOwnFile() {
